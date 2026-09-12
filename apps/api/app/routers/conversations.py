@@ -27,7 +27,7 @@ from ..services.attachments import (
     store_attachment,
 )
 from ..services.tools import run_completion
-from ..services.knowledge import build_system_prompt, retrieve_knowledge
+from ..services.knowledge import build_system_prompt, llm_turns, retrieve_knowledge
 from ..services.operator_media import store_operator_media_reply
 from ..services.providers import resolve_agent_credentials
 from ..services.usage import record_usage
@@ -249,7 +249,7 @@ async def _generate_reply(
     refreshed = _conversation(db, user, conversation.id)
     exchanged = [item for item in refreshed.messages if item.kind == "message"]
     recent = exchanged[-agent.memory_limit:] if agent.memory_limit else []
-    history = [{"role": item.role, "content": llm_text(item)} for item in recent]
+    history = llm_turns(recent, agent.prompt_language)
     messages = [{"role": "system", "content": build_system_prompt(agent, knowledge.text)}, *history]
     base_url, api_key = credentials
     completion = await run_completion(
