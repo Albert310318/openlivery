@@ -1259,6 +1259,36 @@ def portal_report(
         .where(*conv_filters, Conversation.resolved_at >= start, Conversation.resolved_at < end)
         .group_by(resolved_day)
     ).all()
+    handoffs, ai_resolved = db.execute(
+        select(
+            func.count().filter(Conversation.taken_over_at.is_not(None)),
+            func.count().filter(Conversation.status == "resolved", Conversation.taken_over_at.is_(None)),
+        ).where(*conv_filters, Conversation.created_at >= start, Conversation.created_at < end)
+    ).one()
+
+    human_reply = and_(Message.role == "assistant", Message.sender_type == "human")
+    ai_reply = and_(Message.role == "assistant", Message.sender_type != "human")
+    message_filters = [
+        *conv_filters,
+        Message.kind == "message",
+        Message.is_historical.is_(False),
+        Message.created_at >= start,
+        Message.created_at < end,
+    ]
+    message_day = local_day(Message.created_at)
+    message_rows = db.execute(
+        select(
+            message_day,
+            func.count().filter(Message.role == "user"),
+            func.count().filter(ai_reply),
+            func.count().filter(human_reply),
+        )
+        .select_from(Message)
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .where(*message_filters)
+        .group_by(message_day)
+    ).all()
+
     days = {from_ + timedelta(days=i): ReportDay(date=from_ + timedelta(days=i)) for i in range((to - from_).days + 1)}
     for day, count in started_rows:
         if day in days:
@@ -1266,6 +1296,12 @@ def portal_report(
     for day, count in resolved_rows:
         if day in days:
             days[day].resolved = count
+    for day, inbound_count, ai_count, human_count in message_rows:
+        if day in days:
+            days[day].inbound, days[day].ai_replies, days[day].human_replies = inbound_count, ai_count, human_count
+    inbound = sum(d.inbound for d in days.values())
+    ai_replies = sum(d.ai_replies for d in days.values())
+    human_replies = sum(d.human_replies for d in days.values())
 
     channel_rows = db.execute(
         select(Conversation.channel, func.count())
@@ -1273,24 +1309,6 @@ def portal_report(
         .group_by(Conversation.channel)
         .order_by(func.count().desc())
     ).all()
-
-    human_reply = and_(Message.role == "assistant", Message.sender_type == "human")
-    inbound, human_replies, ai_replies = db.execute(
-        select(
-            func.count().filter(Message.role == "user"),
-            func.count().filter(human_reply),
-            func.count().filter(Message.role == "assistant", Message.sender_type != "human"),
-        )
-        .select_from(Message)
-        .join(Conversation, Message.conversation_id == Conversation.id)
-        .where(
-            *conv_filters,
-            Message.kind == "message",
-            Message.is_historical.is_(False),
-            Message.created_at >= start,
-            Message.created_at < end,
-        )
-    ).one()
 
     active_contacts = db.scalar(
         select(func.count(func.distinct(Conversation.contact_id))).where(
@@ -1385,6 +1403,8 @@ def portal_report(
         ai_replies=ai_replies,
         active_contacts=active_contacts or 0,
         agents_online=sum(1 for _, _, availability in users if availability == "online"),
+        handoffs=handoffs,
+        ai_resolved=ai_resolved,
         avg_first_reply_seconds=float(avg_first_reply) if avg_first_reply is not None else None,
         avg_resolution_seconds=float(avg_resolution) if avg_resolution is not None else None,
         by_day=list(days.values()),

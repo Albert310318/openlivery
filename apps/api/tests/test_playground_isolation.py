@@ -9,8 +9,8 @@ from app.services import ai as ai_service
 
 def _setup(client: TestClient):
     customer = client.post("/api/clients", json={"name": "Luna Cafe"}).json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
-    agent = client.post("/api/agents", json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Luna", "is_active": True}).json()
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
+    agent = client.post("/api/agents", json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Luna", "is_active": True}).json()
     rehearsal = client.post("/api/conversations", json={"agent_id": agent["id"]}).json()
     assert rehearsal["channel"] == "playground"
     client.post(f"/api/clients/{customer['id']}/portal-users", json={"name": "Equipo", "email": "equipo@luna.com", "password": "secure-portal"})

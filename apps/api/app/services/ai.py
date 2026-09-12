@@ -1,10 +1,40 @@
+"""Chat completions over raw HTTP against an OpenAI-compatible endpoint.
+
+Every model is reached through the same ``/chat/completions`` dialect, which
+is what OpenRouter speaks for all vendors. The usage block it returns carries
+the cost of the call, so a reply knows what it cost without a price table.
+"""
+
 from dataclasses import dataclass
 
 import httpx
 from fastapi import HTTPException
 
 
-ANTHROPIC_VERSION = "2023-06-01"
+# Attribution headers OpenRouter reads to label the app in its logs.
+APP_HEADERS = {"HTTP-Referer": "https://github.com/sarrazola/openlivery", "X-Title": "OpenLivery"}
+
+
+@dataclass
+class Usage:
+    """Token and cost accounting for one or more provider calls."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+    reasoning_tokens: int = 0
+    # USD as the provider reported it; None when it did not say.
+    cost_usd: float | None = None
+
+    def __add__(self, other: "Usage") -> "Usage":
+        cost = None if self.cost_usd is None and other.cost_usd is None else (self.cost_usd or 0.0) + (other.cost_usd or 0.0)
+        return Usage(
+            self.input_tokens + other.input_tokens,
+            self.output_tokens + other.output_tokens,
+            self.cached_tokens + other.cached_tokens,
+            self.reasoning_tokens + other.reasoning_tokens,
+            cost,
+        )
 
 
 @dataclass
@@ -14,10 +44,21 @@ class Completion:
     output_tokens: int = 0
     # Set by the tool loop: [{name, arguments, result_preview, is_error}].
     tool_calls: list[dict] | None = None
+    # What the reply cost in USD, summed across tool-loop rounds; None when the
+    # provider reported no cost.
+    cost_usd: float | None = None
+    cached_tokens: int = 0
+    reasoning_tokens: int = 0
+    # The upstream vendor that actually served the request, when the router names it.
+    served_by: str = ""
+    # Wall-clock time the whole completion took (tool rounds included); set
+    # by run_completion.
+    duration_ms: int | None = None
+
 
 # Substrings in a provider's 400 error that mean a sampling parameter is not
-# accepted (e.g. reasoning models, or Anthropic's temperature <= 1 limit). When
-# seen, we retry once without those params.
+# accepted (e.g. reasoning models that refuse temperature). When seen, we retry
+# once without those params.
 _SAMPLING_PARAM_HINTS = ("temperature", "max_tokens", "max_output_tokens", "max_completion_tokens", "unsupported", "not supported")
 
 
@@ -31,12 +72,13 @@ async def chat_completion(
     temperature: float | None = None,
     max_tokens: int | None = None,
 ) -> Completion:
-    """Generate a reply using the provider's modern chat API: the OpenAI
-    Responses API, or the Anthropic Messages API."""
+    """Generate a reply through ``{base_url}/chat/completions``.
+
+    ``provider`` names the registry entry the credentials came from; every
+    supported provider speaks the same dialect, so it does not change the call.
+    """
     try:
-        if provider == "anthropic":
-            return await _anthropic_messages(base_url, api_key, model, messages, temperature, max_tokens)
-        return await _openai_responses(base_url, api_key, model, messages, temperature, max_tokens)
+        return await _chat_completions(base_url, api_key, model, messages, temperature, max_tokens)
     except HTTPException:
         raise
     except (httpx.HTTPError, KeyError, ValueError, IndexError) as exc:
@@ -46,50 +88,62 @@ async def chat_completion(
         ) from exc
 
 
-async def _openai_responses(base_url, api_key, model, messages, temperature, max_tokens) -> Completion:
-    url = f"{base_url.rstrip('/')}/responses"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    instructions = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
-    input_items = [{"role": m["role"], "content": m["content"]} for m in messages if m["role"] != "system"]
-    base_payload: dict = {"model": model, "input": input_items}
-    if instructions:
-        base_payload["instructions"] = instructions
+def chat_url(base_url: str) -> str:
+    return f"{base_url.rstrip('/')}/chat/completions"
+
+
+def auth_headers(api_key: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", **APP_HEADERS}
+
+
+def sampling_params(temperature: float | None, max_tokens: int | None) -> dict:
     sampling: dict = {}
     if temperature is not None:
         sampling["temperature"] = temperature
     if max_tokens is not None:
-        sampling["max_output_tokens"] = max_tokens
-    data = await _post_json(url, headers, base_payload, sampling)
-    usage = data.get("usage") or {}
+        sampling["max_tokens"] = max_tokens
+    return sampling
+
+
+async def _chat_completions(base_url, api_key, model, messages, temperature, max_tokens) -> Completion:
+    payload = {"model": model, "messages": [{"role": m["role"], "content": m["content"]} for m in messages]}
+    data = await _post_json(chat_url(base_url), auth_headers(api_key), payload, sampling_params(temperature, max_tokens))
+    return completion_from(extract_chat_text(data), read_usage(data), data)
+
+
+def completion_from(text: str, usage: Usage, data: dict, tool_calls: list[dict] | None = None) -> Completion:
     return Completion(
-        text=extract_openai_text(data),
-        input_tokens=int(usage.get("input_tokens") or 0),
-        output_tokens=int(usage.get("output_tokens") or 0),
+        text,
+        usage.input_tokens,
+        usage.output_tokens,
+        tool_calls=tool_calls,
+        cost_usd=usage.cost_usd,
+        cached_tokens=usage.cached_tokens,
+        reasoning_tokens=usage.reasoning_tokens,
+        served_by=str(data.get("provider") or ""),
     )
 
 
-async def _anthropic_messages(base_url, api_key, model, messages, temperature, max_tokens) -> Completion:
-    url = f"{base_url.rstrip('/')}/messages"
-    headers = {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION, "Content-Type": "application/json"}
-    system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
-    convo = [{"role": m["role"], "content": m["content"]} for m in messages if m["role"] in ("user", "assistant")]
-    # Anthropic requires max_tokens; sampling (temperature) is retried away on error.
-    base_payload: dict = {"model": model, "messages": convo, "max_tokens": max_tokens or 2048}
-    if system:
-        base_payload["system"] = system
-    sampling: dict = {}
-    if temperature is not None:
-        sampling["temperature"] = temperature
-    data = await _post_json(url, headers, base_payload, sampling)
-    parts = [block.get("text", "") for block in data.get("content", []) if block.get("type") == "text"]
-    text = "".join(parts).strip()
-    if not text:
-        raise ValueError("empty response")
+def read_usage(data: dict) -> Usage:
+    """The usage block of a chat completion, cost included.
+
+    OpenRouter reports ``cost`` (what it charges) and, for requests served
+    through a key the account brought itself, ``upstream_inference_cost`` (what
+    the vendor charged). The real cost of the call is the two together.
+    """
     usage = data.get("usage") or {}
-    return Completion(
-        text=text,
-        input_tokens=int(usage.get("input_tokens") or 0),
-        output_tokens=int(usage.get("output_tokens") or 0),
+    prompt_details = usage.get("prompt_tokens_details") or {}
+    completion_details = usage.get("completion_tokens_details") or {}
+    cost_details = usage.get("cost_details") or {}
+    cost = usage.get("cost")
+    upstream = cost_details.get("upstream_inference_cost")
+    cost_usd = None if cost is None and upstream is None else float(cost or 0) + float(upstream or 0)
+    return Usage(
+        input_tokens=int(usage.get("prompt_tokens") or 0),
+        output_tokens=int(usage.get("completion_tokens") or 0),
+        cached_tokens=int(prompt_details.get("cached_tokens") or 0),
+        reasoning_tokens=int(completion_details.get("reasoning_tokens") or 0),
+        cost_usd=cost_usd,
     )
 
 
@@ -103,18 +157,18 @@ async def _post_json(url: str, headers: dict, base_payload: dict, sampling: dict
     return response.json()
 
 
-def extract_openai_text(data: dict) -> str:
-    """Pull the assistant text out of an OpenAI Responses API result."""
-    convenience = data.get("output_text")
-    if isinstance(convenience, str) and convenience.strip():
-        return convenience.strip()
-    parts: list[str] = []
-    for item in data.get("output", []):
-        if item.get("type") == "message":
-            for chunk in item.get("content", []) or []:
-                if chunk.get("type") in ("output_text", "text"):
-                    parts.append(chunk.get("text", ""))
-    text = "".join(parts).strip()
+def chat_message(data: dict) -> dict:
+    """The assistant message of a chat completion (first choice)."""
+    return data["choices"][0].get("message") or {}
+
+
+def extract_chat_text(data: dict) -> str:
+    """Pull the assistant text out of a chat completion result."""
+    content = chat_message(data).get("content")
+    if isinstance(content, list):
+        # Some vendors answer with content parts instead of a plain string.
+        content = "".join(part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text")
+    text = (content or "").strip()
     if not text:
         raise ValueError("empty response")
     return text
@@ -137,26 +191,25 @@ def _safe_provider_error(response: httpx.Response) -> str:
 
 
 async def test_provider(provider: str, base_url: str, api_key: str) -> dict:
-    """Verify a provider key by listing its models."""
-    if provider == "anthropic":
-        headers = {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION}
-    else:
-        headers = {"Authorization": f"Bearer {api_key}"}
-    url = f"{base_url.rstrip('/')}/models"
+    """Verify a key by asking the provider about it.
+
+    ``GET {base_url}/key`` needs a valid key and describes it (OpenRouter's
+    model list is public, so listing models would accept any string).
+    """
+    url = f"{base_url.rstrip('/')}/key"
     try:
         async with httpx.AsyncClient(timeout=25) as client:
-            response = await client.get(url, headers=headers)
+            response = await client.get(url, headers={"Authorization": f"Bearer {api_key}", **APP_HEADERS})
         if response.status_code < 400:
             try:
-                data = response.json()
-                models = sorted(
-                    item.get("id", "")
-                    for item in data.get("data", [])
-                    if isinstance(item, dict) and item.get("id")
-                )
+                info = response.json().get("data") or {}
             except (ValueError, AttributeError):
-                models = []
-            return {"ok": True, "message": f"Key verified. {len(models)} models available.", "models": models}
+                info = {}
+            remaining = info.get("limit_remaining")
+            message = "Key verified."
+            if isinstance(remaining, (int, float)):
+                message = f"Key verified. Remaining credit: ${remaining:,.2f}."
+            return {"ok": True, "message": message, "models": []}
         raise HTTPException(status_code=502, detail=f"Could not verify the key: {_safe_provider_error(response)}")
     except HTTPException:
         raise

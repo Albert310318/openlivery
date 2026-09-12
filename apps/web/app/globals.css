@@ -1052,6 +1052,8 @@ textarea { line-height: 1.55; }
 .report-agent { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); font-weight: 600; }
 .report-agent i { width: 8px; height: 8px; border-radius: 50%; background: var(--surface-5); }
 .report-agent.online i { background: var(--green); }
+.portal-reports .metrics-grid { margin: 0; }
+.report-toggle button { padding: 5px 12px; font-size: 12.5px; }
 @media (max-width: 900px) { .report-columns { grid-template-columns: 1fr; } }
 .portal-composer input { flex: 1; }
 .portal-composer button { width: 42px; display: grid; place-items: center; color: white; border: 0; border-radius: 7px; background: var(--portal-color); }

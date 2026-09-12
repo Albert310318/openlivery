@@ -50,10 +50,10 @@ def test_future_booking_tool_runs_outside_reception_hours(authenticated_client, 
     monkeypatch.setattr(knowledge, "datetime", MondayMorning)
     client = authenticated_client
     customer = client.post("/api/clients", json={"name": "Appointments", "timezone": "America/Bogota"}).json()
-    assert client.put("/api/providers/openai", json={"api_key": "test-key"}).status_code == 200
+    assert client.put("/api/providers/openrouter", json={"api_key": "test-key"}).status_code == 200
     policies = "Reception: Monday-Friday 09:00-17:00. Online bookings allowed 24 hours for available future slots."
     agent = client.post("/api/agents", json={
-        "client_id": customer["id"], "name": "Assistant", "provider": "openai", "model": "gpt-5",
+        "client_id": customer["id"], "name": "Assistant", "provider": "openrouter", "model": "gpt-5",
         "is_active": True, "prompt_language": "en", "brief_policies": policies,
     }).json()
     created = client.post(f"/api/agents/{agent['id']}/tools", json={
@@ -68,9 +68,10 @@ def test_future_booking_tool_runs_outside_reception_hours(authenticated_client, 
     monkeypatch.setattr(loop, "execute_http_tool", endpoint)
     reply = "The slot is unavailable." if tool_failed else "Appointment A-123 is booked."
     provider = AsyncMock(side_effect=[
-        {"output": [{"type": "function_call", "call_id": "b1", "name": "book_appointment",
-                     "arguments": json.dumps({"starts_at": requested_time})}]},
-        {"output": [{"type": "message", "content": [{"type": "output_text", "text": reply}]}]},
+        {"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [
+            {"id": "b1", "type": "function", "function": {"name": "book_appointment", "arguments": json.dumps({"starts_at": requested_time})}},
+        ]}}]},
+        {"choices": [{"message": {"role": "assistant", "content": reply}}]},
     ])
     monkeypatch.setattr(loop, "_post_json", provider)
     conversation = client.post("/api/conversations", json={"agent_id": agent["id"]}).json()
@@ -82,14 +83,16 @@ def test_future_booking_tool_runs_outside_reception_hours(authenticated_client, 
     assert endpoint.await_args.args[1] == {"starts_at": requested_time}
     assert provider.await_count == 2
     sent = provider.await_args_list[0].args[2]
-    assert "Monday, 2026-09-14 01:00" in sent["instructions"]
-    assert policies in sent["instructions"]
-    assert "future dates outside those hours when business policies allow it" in sent["instructions"]
-    assert "only after the tool that records it confirms success" in sent["instructions"]
-    assert sent["tools"][0]["name"] == "book_appointment"
-    returned = provider.await_args_list[1].args[2]["input"][-1]
-    assert returned["type"] == "function_call_output"
-    assert returned["output"] == (f"Tool call failed: {result}" if tool_failed else result)
+    instructions = sent["messages"][0]["content"]
+    assert sent["messages"][0]["role"] == "system"
+    assert "Monday, 2026-09-14 01:00" in instructions
+    assert policies in instructions
+    assert "future dates outside those hours when business policies allow it" in instructions
+    assert "only after the tool that records it confirms success" in instructions
+    assert sent["tools"][0]["function"]["name"] == "book_appointment"
+    returned = provider.await_args_list[1].args[2]["messages"][-1]
+    assert returned["role"] == "tool" and returned["tool_call_id"] == "b1"
+    assert returned["content"] == (f"Tool call failed: {result}" if tool_failed else result)
     assistant = response.json()["messages"][-1]
     assert assistant["tool_calls"][0]["is_error"] is tool_failed
     assert assistant["tool_calls"][0]["arguments"] == {"starts_at": requested_time}

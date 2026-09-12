@@ -20,10 +20,10 @@ def test_audio_filename_follows_the_mime():
 def test_playground_voice_note_is_transcribed_under_its_real_container(authenticated_client: TestClient, monkeypatch):
     client = authenticated_client
     customer = client.post("/api/clients", json={"name": "Pizza Co"}).json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
-        json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Memo", "audio_enabled": True, "is_active": True},
+        json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Memo", "audio_enabled": True, "is_active": True},
     ).json()
     conversation = client.post("/api/conversations", json={"agent_id": agent["id"]}).json()
 

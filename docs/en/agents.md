@@ -20,18 +20,18 @@ New agents are created through a five-step wizard (**Agents → New agent**); th
 
 The built-in starter templates are Restaurant orders, Real estate leads, Clinic appointments, Online store support and Customer support. After creation you refine everything on the agent detail page, where **Basics** holds the client, name, business brief, the agent's job, escalation and model. The model section shows how many tokens the composed prompt costs on every message. Creating a client ends on the wizard with that client preselected.
 
-## Choosing a provider and model
+## Choosing a model
 
-Each agent uses one provider — `openai` or `anthropic` — and one model from that provider. The agency's stored API key for that provider is used, so add your keys first. See [AI providers](ai-providers.md) for the available models and how keys are configured. The model field accepts a custom value if you run a model that isn't in the preset list.
+Each agent picks one model by its OpenRouter slug (`openai/gpt-5.6-luna`, `anthropic/claude-sonnet-5`, `google/gemini-3.8-flash`). The agency's stored OpenRouter key is used, so add it first. See [AI providers](ai-providers.md) for the available models and how the key is configured. The model field accepts any slug typed by hand if the model you want isn't in the preset list.
 
 ## Multimodal capabilities
 
 An agent understands incoming media out of the box: both capabilities are on for new agents. Each has its own toggle and its own model setting, independent of the main chat model, under the advanced options of the model section:
 
 - **Image recognition (vision)** — when `image_enabled` is on, inbound images are described by the model in `image_model` before reaching the agent.
-- **Audio transcription** — when `audio_enabled` is on, inbound audio is transcribed by the model in `audio_model` (default `whisper-1`) before reaching the agent.
+- **Audio transcription** — when `audio_enabled` is on, inbound audio is transcribed by the model in `audio_model` (default `openai/gpt-4o-mini-transcribe`) before reaching the agent.
 
-Both features use OpenAI models, so they require an OpenAI key regardless of the agent's chat provider.
+Both features go through the same OpenRouter key as the chat model.
 
 ## Agent settings
 
@@ -45,8 +45,8 @@ Both features use OpenAI models, so they require an OpenAI key regardless of the
 | Contact | from the conversation | Name, phone, e-mail, tags and channel of the person writing, added to the prompt at reply time so a form, an e-mail or a tool gets them instead of "not specified". Only what the contact record has is listed. Absent in the playground. |
 | Prompt language | `prompt_language` | `es` or `en`: the language of the prompt's headings and fixed sentences. Set from the UI language when the agent is saved. |
 | Timezone | `timezone` (on the client) | IANA timezone of the business (e.g. `America/Bogota`), injected so every agent of the client knows the local date and time. Set on the client, defaults to `UTC`. |
-| Provider | `provider` | `openai` or `anthropic`. |
-| Model | `model` | The chat model used for replies. |
+| Provider | `provider` | Always `openrouter`. |
+| Model | `model` | The chat model used for replies, as an OpenRouter slug. |
 | Temperature | `temperature` | Sampling randomness, `0.0`–`2.0` (default `0.7`). |
 | Max tokens | `max_tokens` | Maximum tokens per reply, `1`–`32000` (default `2048`). |
 | Memory limit | `memory_limit` | How many past messages are kept as conversation memory, `0`–`200` (default `30`). |

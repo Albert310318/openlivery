@@ -51,10 +51,10 @@ def test_inbound_creates_the_contact_and_a_new_case_after_resolution(authenticat
     client = authenticated_client
     customer = _portal(client, "Cases Co")
     slug = customer["portal_slug"]
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
-        json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Beto", "instructions": "", "personality": "", "is_active": True},
+        json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Beto", "instructions": "", "personality": "", "is_active": True},
     ).json()
     channel = client.put(f"/api/whatsapp/channels/{customer['id']}", json={"agent_id": agent["id"]}).json()
     headers = {"X-Bridge-Token": get_settings().whatsapp_bridge_token}
@@ -110,10 +110,10 @@ def test_merge_contacts_moves_conversations_and_fills_blanks(authenticated_clien
     client = authenticated_client
     customer = _portal(client, "Merge Co")
     slug = customer["portal_slug"]
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
-        json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Beto", "instructions": "", "personality": "", "is_active": True},
+        json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Beto", "instructions": "", "personality": "", "is_active": True},
     ).json()
     channel = client.put(f"/api/whatsapp/channels/{customer['id']}", json={"agent_id": agent["id"]}).json()
     headers = {"X-Bridge-Token": get_settings().whatsapp_bridge_token}
@@ -253,8 +253,8 @@ def test_tagged_contact_routes_new_conversations_to_a_team(authenticated_client:
     members = client.get(f"{base}/members").json()
     team = client.post(f"{base}/teams", json={"name": "Ventas", "member_ids": [m["id"] for m in members]}).json()
 
-    client.put("/api/providers/openai", json={"api_key": "secret"})
-    agent = client.post("/api/agents", json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Beto AI", "instructions": "", "personality": "", "is_active": True}).json()
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
+    agent = client.post("/api/agents", json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Beto AI", "instructions": "", "personality": "", "is_active": True}).json()
     channel = client.put(f"/api/whatsapp/channels/{customer['id']}", json={"agent_id": agent["id"]}).json()
     headers = {"X-Bridge-Token": get_settings().whatsapp_bridge_token}
     completion = AsyncMock(return_value=ai_service.Completion(text="Hello!", input_tokens=1, output_tokens=1))
@@ -356,10 +356,10 @@ def test_the_agent_is_told_who_it_is_talking_to(authenticated_client: TestClient
     client = authenticated_client
     customer = _portal(client, "Context Co")
     slug = customer["portal_slug"]
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
-        json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Beto", "instructions": "Capture leads.", "is_active": True},
+        json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Beto", "instructions": "Capture leads.", "is_active": True},
     ).json()
     channel = client.put(f"/api/whatsapp/channels/{customer['id']}", json={"agent_id": agent["id"]}).json()
     headers = {"X-Bridge-Token": get_settings().whatsapp_bridge_token}

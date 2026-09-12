@@ -21,12 +21,12 @@ def _setup_bridge_channel(client: TestClient) -> str:
         "/api/clients",
         json={"name": "Casa", "is_active": True},
     ).json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
         json={
             "client_id": customer["id"],
-            "provider": "openai",
+            "provider": "openrouter",
             "model": "gpt-4.1-mini",
             "name": "Bella",
             "instructions": "",

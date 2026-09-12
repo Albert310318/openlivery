@@ -246,11 +246,11 @@ def test_webhook_provider_fires_when_a_human_is_expected_to_answer(
         f"/api/clients/{cid}/portal-users",
         json={"email": "ana@barberco.com", "password": "ana-password", "name": "Ana"},
     )
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
         json={
-            "client_id": cid, "provider": "openai", "model": "gpt-4.1-mini", "name": "Sofia",
+            "client_id": cid, "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Sofia",
             "instructions": "", "personality": "", "is_active": True,
         },
     ).json()

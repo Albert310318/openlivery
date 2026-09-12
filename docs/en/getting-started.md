@@ -37,8 +37,8 @@ Prefer not to build locally? `make pull` runs the prebuilt images published to G
 ## First steps
 
 1. **Create your agency** on the first screen — this is the top-level workspace that owns everything else.
-2. Open **Settings** and add an OpenAI and/or Anthropic API key. The key is verified when you save it. See [AI providers](ai-providers.md).
-3. Create a **client**, then an **agent** for that client: pick a provider and model and write the agent's instructions. See [Agents](agents.md).
+2. Open **Settings** and add your OpenRouter API key. The key is verified when you save it. See [AI providers](ai-providers.md).
+3. Create a **client**, then an **agent** for that client: pick a model and write the agent's instructions. See [Agents](agents.md).
 4. Add knowledge (context, Q&A pairs, PDFs) and optionally enable image or audio understanding. See [Knowledge base](knowledge-base.md).
 5. Open the **Playground** to chat with the agent, then connect a [WhatsApp](whatsapp.md) number or embed the [web widget](web-widget.md).
 

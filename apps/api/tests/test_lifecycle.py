@@ -137,7 +137,7 @@ def test_an_inactive_client_is_switched_off_everywhere(authenticated_client: Tes
     client = authenticated_client
     customer, agent = _portal(client)
     slug = customer["portal_slug"]
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     client.patch(f"/api/agents/{agent['id']}", json={"model": "gpt-4.1-mini"})
     client.put(f"/api/whatsapp/channels/{customer['id']}", json={"agent_id": agent["id"]})
     completion = AsyncMock(return_value=Completion(text="Should not be sent"))
@@ -179,7 +179,7 @@ def test_a_blocked_contact_talks_to_a_wall(authenticated_client: TestClient, mon
     client = authenticated_client
     customer, agent = _portal(client)
     slug = customer["portal_slug"]
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     client.patch(f"/api/agents/{agent['id']}", json={"model": "gpt-4.1-mini", "reply_delay_min_seconds": 0, "reply_delay_max_seconds": 0})
     client.put(f"/api/whatsapp/channels/{customer['id']}", json={"agent_id": agent["id"]})
     completion = AsyncMock(return_value=Completion(text="Hi there"))

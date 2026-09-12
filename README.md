@@ -27,8 +27,8 @@
 
 One OpenLivery installation serves one agency. The agency creates AI agents for its
 clients, gives each client a branded portal, and talks to end users over
-WhatsApp or an embeddable web chat widget. Bring your own OpenAI / Anthropic
-keys and self-host the whole thing with one command.
+WhatsApp or an embeddable web chat widget. Bring your own OpenRouter key and
+self-host the whole thing with one command.
 
 First-run setup creates your agency and owner account, then public registration
 closes. Add as many client workspaces as your agency needs inside that installation.
@@ -60,8 +60,11 @@ Full documentation lives in **[docs/](docs/)**. Every guide is written twice:
 - ✅ Portable JSON embeddings — no database extension required
 
 **AI providers** — [docs](docs/en/ai-providers.md)
-- ✅ Bring-your-own **OpenAI** (Responses API) and **Anthropic** (Messages API) keys — agency-level, encrypted, and validated when saved
-- ✅ Any OpenAI-compatible endpoint via per-connection base URL + model
+- ✅ Bring-your-own **OpenRouter** key — agency-level, encrypted, and validated when saved
+- ✅ Any model OpenRouter offers (OpenAI, Anthropic, Google, DeepSeek, xAI, Meta, ...), picked per agent by slug, with the real cost of every reply recorded
+
+**Reports** — [docs](docs/en/reports.md)
+- ✅ AI cost by client, agent, model and day, plus every reply with its tokens, cost, vendor and duration, exportable as CSV
 
 **Custom tools** — [docs](docs/en/custom-tools.md)
 - ✅ Per-agent **HTTP tools**: any REST endpoint with path/query/body parameters, encrypted auth headers and an SSRF guard

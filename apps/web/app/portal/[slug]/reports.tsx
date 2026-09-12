@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Bot, Clock, Inbox, LoaderCircle, MessageSquareText, MessagesSquare, Timer, UserRound, Users } from "lucide-react";
 import { Alert } from "@/components/ui";
 import { api, messageFrom } from "@/lib/api";
 import { useLanguage, useT } from "@/lib/i18n";
@@ -11,8 +11,14 @@ const RANGES = [7, 30, 90] as const;
 const CHANNELS = ["whatsapp", "whatsapp_cloud", "instagram", "messenger", "widget", "playground"] as const;
 const STARTED_COLOR = "#635bff";
 const RESOLVED_COLOR = "#0f8b76";
+const INBOUND_COLOR = "#635bff";
+const AI_COLOR = "#0f8b76";
+const HUMAN_COLOR = "#e0a02e";
 
 type Member = { id: string; name: string; email: string };
+type DayKey = "started" | "resolved" | "inbound" | "ai_replies" | "human_replies";
+type Series = { key: DayKey; color: string; name: string };
+type ChartKind = "conversations" | "messages";
 
 function localISO(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -38,12 +44,14 @@ function formatSeconds(value: number | null, none: string): string {
 export function ReportsView({ slug }: { slug: string }) {
   const t = useT();
   const { lang } = useLanguage();
+  const locale = lang === "es" ? "es" : "en";
   const [range, setRange] = useState<number | "custom">(7);
   const [customFrom, setCustomFrom] = useState(daysAgoISO(6));
   const [customTo, setCustomTo] = useState(daysAgoISO(0));
   const [channel, setChannel] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
   const [teamId, setTeamId] = useState("");
+  const [chart, setChart] = useState<ChartKind>("conversations");
   const [members, setMembers] = useState<Member[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [report, setReport] = useState<PortalReport | null>(null);
@@ -70,7 +78,7 @@ export function ReportsView({ slug }: { slug: string }) {
     load().catch((err) => setError(messageFrom(err))).finally(() => setLoading(false));
   }, [load]);
 
-  const dayLabel = (iso: string) => new Date(`${iso}T00:00`).toLocaleDateString(lang === "es" ? "es" : "en", { day: "numeric", month: "short" });
+  const dayLabel = (iso: string) => new Date(`${iso}T00:00`).toLocaleDateString(locale, { day: "numeric", month: "short" });
   const channelLabel = (value: string) => {
     if (value === "playground") return t("inbox.channelPlayground");
     if (value === "whatsapp") return t("inbox.channelWhatsapp");
@@ -113,48 +121,62 @@ export function ReportsView({ slug }: { slug: string }) {
   if (error) return <div className="portal-reports">{filters}<Alert>{error}</Alert></div>;
   if (!report) return <div className="portal-reports">{filters}</div>;
 
-  const maxDay = Math.max(1, ...report.by_day.map((d) => Math.max(d.started, d.resolved)));
+  const series: Series[] = chart === "conversations"
+    ? [
+      { key: "started", color: STARTED_COLOR, name: t("portal.reports.legendStarted") },
+      { key: "resolved", color: RESOLVED_COLOR, name: t("portal.reports.legendResolved") },
+    ]
+    : [
+      { key: "inbound", color: INBOUND_COLOR, name: t("portal.reports.legendInbound") },
+      { key: "ai_replies", color: AI_COLOR, name: t("portal.reports.legendAi") },
+      { key: "human_replies", color: HUMAN_COLOR, name: t("portal.reports.legendHuman") },
+    ];
+  const maxValue = Math.max(1, ...report.by_day.flatMap((day) => series.map((s) => day[s.key])));
+  const hasBars = report.by_day.some((day) => series.some((s) => day[s.key] > 0));
   const labelStep = Math.max(1, Math.ceil(report.by_day.length / 8));
   const maxChannel = Math.max(1, ...report.by_channel.map((c) => c.started));
   const none = "-";
-  const tiles: { label: string; value: string }[] = [
-    { label: t("portal.reports.started"), value: String(report.started) },
-    { label: t("portal.reports.resolved"), value: String(report.resolved) },
-    { label: t("portal.reports.openNow"), value: String(report.open_now) },
-    { label: t("portal.reports.agentsOnline"), value: String(report.agents_online) },
-    { label: t("portal.reports.inbound"), value: String(report.inbound_messages) },
-    { label: t("portal.reports.humanReplies"), value: String(report.human_replies) },
-    { label: t("portal.reports.aiReplies"), value: String(report.ai_replies) },
-    { label: t("portal.reports.contacts"), value: String(report.active_contacts) },
-    { label: t("portal.reports.firstReply"), value: formatSeconds(report.avg_first_reply_seconds, none) },
-    { label: t("portal.reports.resolutionTime"), value: formatSeconds(report.avg_resolution_seconds, none) },
-  ];
+  const aiResolvedPct = report.started ? Math.round((report.ai_resolved / report.started) * 100) : 0;
+
+  const metric = (icon: ReactNode, tone: string, label: string, value: string, hint: string) => (
+    <article className="metric-card">
+      <span className={`metric-icon ${tone}`}>{icon}</span>
+      <div><small>{label}</small><strong>{value}</strong><p>{hint}</p></div>
+    </article>
+  );
 
   return <div className="portal-reports">
     {filters}
 
-    <div className="report-tiles">
-      {tiles.map((tile) => <div key={tile.label} className="report-tile"><small>{tile.label}</small><strong>{tile.value}</strong></div>)}
-    </div>
+    <section className="metrics-grid">
+      {metric(<MessagesSquare size={20} />, "violet", t("portal.reports.started"), String(report.started), t("portal.reports.startedHint", { n: report.resolved }))}
+      {metric(<Bot size={20} />, "green", t("portal.reports.aiResolved"), `${aiResolvedPct}%`, t("portal.reports.aiResolvedHint", { r: report.ai_resolved, t: report.started }))}
+      {metric(<UserRound size={20} />, "amber", t("portal.reports.handoffs"), String(report.handoffs), t("portal.reports.handoffsHint", { n: report.agents_online }))}
+      {metric(<Inbox size={20} />, "blue", t("portal.reports.openNow"), String(report.open_now), t("portal.reports.openNowHint"))}
+      {metric(<MessageSquareText size={20} />, "violet", t("portal.reports.inbound"), String(report.inbound_messages), t("portal.reports.inboundHint", { a: report.ai_replies, h: report.human_replies }))}
+      {metric(<Users size={20} />, "blue", t("portal.reports.contacts"), String(report.active_contacts), t("portal.reports.contactsHint"))}
+      {metric(<Clock size={20} />, "green", t("portal.reports.firstReply"), formatSeconds(report.avg_first_reply_seconds, none), t("portal.reports.firstReplyHint"))}
+      {metric(<Timer size={20} />, "amber", t("portal.reports.resolutionTime"), formatSeconds(report.avg_resolution_seconds, none), t("portal.reports.resolutionTimeHint"))}
+    </section>
 
     <section className="report-card">
       <header>
-        <h3>{t("portal.reports.perDay")}</h3>
+        <div className="report-ranges report-toggle">
+          <button type="button" className={chart === "conversations" ? "active" : ""} onClick={() => setChart("conversations")}>{t("portal.reports.chartConversations")}</button>
+          <button type="button" className={chart === "messages" ? "active" : ""} onClick={() => setChart("messages")}>{t("portal.reports.chartMessages")}</button>
+        </div>
         <div className="report-legend">
-          <span><i style={{ background: STARTED_COLOR }} /> {t("portal.reports.legendStarted")}</span>
-          <span><i style={{ background: RESOLVED_COLOR }} /> {t("portal.reports.legendResolved")}</span>
+          {series.map((s) => <span key={s.key}><i style={{ background: s.color }} /> {s.name}</span>)}
         </div>
       </header>
-      {report.started || report.resolved ? <div className="report-chart" role="img" aria-label={t("portal.reports.perDay")}>
+      {hasBars ? <div className="report-chart" role="img" aria-label={t("portal.reports.perDay")}>
         {report.by_day.map((day, i) => <div key={day.date} className="report-chart-group">
           <div className="report-chart-tip">
             <strong>{dayLabel(day.date)}</strong>
-            <span>{t("portal.reports.legendStarted")}: {day.started}</span>
-            <span>{t("portal.reports.legendResolved")}: {day.resolved}</span>
+            {series.map((s) => <span key={s.key}>{s.name}: {day[s.key]}</span>)}
           </div>
           <div className="report-chart-bars">
-            <i style={{ height: `${(day.started / maxDay) * 100}%`, background: STARTED_COLOR }} />
-            <i style={{ height: `${(day.resolved / maxDay) * 100}%`, background: RESOLVED_COLOR }} />
+            {series.map((s) => <i key={s.key} style={{ height: `${(day[s.key] / maxValue) * 100}%`, background: s.color }} />)}
           </div>
           <small>{i % labelStep === 0 ? dayLabel(day.date) : " "}</small>
         </div>)}

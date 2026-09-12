@@ -40,40 +40,48 @@ def _fake_http(monkeypatch, captured, response_json):
     monkeypatch.setattr(ai_service.httpx, "AsyncClient", lambda **_kwargs: FakeClient())
 
 
-def test_openai_uses_responses_api(monkeypatch):
+def test_chat_completion_uses_chat_completions_and_reads_cost(monkeypatch):
     captured = {}
-    _fake_http(monkeypatch, captured, {"output": [{"type": "message", "content": [{"type": "output_text", "text": "OK"}]}]})
+    _fake_http(monkeypatch, captured, {
+        "provider": "Azure",
+        "choices": [{"message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}],
+        "usage": {
+            "prompt_tokens": 27, "completion_tokens": 26, "cost": 0, "is_byok": True,
+            "prompt_tokens_details": {"cached_tokens": 5},
+            "completion_tokens_details": {"reasoning_tokens": 3},
+            "cost_details": {"upstream_inference_cost": 4.026e-05},
+        },
+    })
     answer = asyncio.run(
         ai_service.chat_completion(
-            "openai", "https://api.openai.test/v1", "secret", "gpt-5",
+            "openrouter", "https://openrouter.test/api/v1", "secret", "openai/gpt-5.6-luna",
             [{"role": "system", "content": "Be brief"}, {"role": "user", "content": "Hello"}],
-        )
-    )
-    assert answer.text == "OK"
-    assert captured["url"].endswith("/responses")
-    assert captured["headers"]["Authorization"] == "Bearer secret"
-    assert captured["payload"]["instructions"] == "Be brief"
-    assert captured["payload"]["input"] == [{"role": "user", "content": "Hello"}]
-    assert "temperature" not in captured["payload"]  # no sampling params passed
-
-
-def test_anthropic_uses_messages_api(monkeypatch):
-    captured = {}
-    _fake_http(monkeypatch, captured, {"content": [{"type": "text", "text": "Hola"}]})
-    answer = asyncio.run(
-        ai_service.chat_completion(
-            "anthropic", "https://api.anthropic.test/v1", "key", "claude-opus-4-8",
-            [{"role": "system", "content": "Be brief"}, {"role": "user", "content": "Hi"}],
             max_tokens=100,
         )
     )
-    assert answer.text == "Hola"
-    assert captured["url"].endswith("/messages")
-    assert captured["headers"]["x-api-key"] == "key"
-    assert captured["headers"]["anthropic-version"] == ai_service.ANTHROPIC_VERSION
-    assert captured["payload"]["system"] == "Be brief"
-    assert captured["payload"]["messages"] == [{"role": "user", "content": "Hi"}]
+    assert answer.text == "OK"
+    assert captured["url"].endswith("/chat/completions")
+    assert captured["headers"]["Authorization"] == "Bearer secret"
+    assert captured["headers"]["X-Title"] == "OpenLivery"
+    assert captured["payload"]["messages"] == [{"role": "system", "content": "Be brief"}, {"role": "user", "content": "Hello"}]
     assert captured["payload"]["max_tokens"] == 100
+    assert "temperature" not in captured["payload"]  # no sampling params passed
+    assert (answer.input_tokens, answer.output_tokens) == (27, 26)
+    assert (answer.cached_tokens, answer.reasoning_tokens) == (5, 3)
+    # The real cost is what the router charged plus what the upstream vendor did.
+    assert answer.cost_usd == 4.026e-05
+    assert answer.served_by == "Azure"
+
+
+def test_chat_completion_without_usage_cost_reports_none(monkeypatch):
+    captured = {}
+    _fake_http(monkeypatch, captured, {
+        "choices": [{"message": {"role": "assistant", "content": [{"type": "text", "text": "Hola"}]}}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+    })
+    answer = asyncio.run(ai_service.chat_completion("openrouter", "https://openrouter.test/api/v1", "k", "m", [{"role": "user", "content": "Hi"}]))
+    assert answer.text == "Hola"
+    assert answer.cost_usd is None
 
 
 def test_register_login_logout_and_me(client: TestClient):
@@ -117,15 +125,15 @@ def test_single_agency_instance_closes_registration(client: TestClient):
 
 
 def test_provider_key_is_stored_masked(authenticated_client: TestClient):
-    saved = authenticated_client.put("/api/providers/openai", json={"api_key": "sk-super-secret-key"})
+    saved = authenticated_client.put("/api/providers/openrouter", json={"api_key": "sk-super-secret-key"})
     assert saved.status_code == 200
     assert saved.json()["configured"] is True
     assert saved.json()["api_key_masked"] != "sk-super-secret-key"
     assert "encrypted_api_key" not in saved.json()
 
     listed = authenticated_client.get("/api/providers").json()
-    assert {p["provider"] for p in listed} == {"openai", "anthropic"}
-    assert next(p for p in listed if p["provider"] == "openai")["configured"] is True
+    assert {p["provider"] for p in listed} == {"openrouter"}
+    assert next(p for p in listed if p["provider"] == "openrouter")["configured"] is True
 
 
 def test_main_crud_knowledge_and_persistent_chat(authenticated_client: TestClient, monkeypatch):
@@ -144,14 +152,14 @@ def test_main_crud_knowledge_and_persistent_chat(authenticated_client: TestClien
     assert customer.json()["timezone"] == "America/Bogota"
     client_id = customer.json()["id"]
 
-    key = client.put("/api/providers/openai", json={"api_key": "sk-super-secret-key"})
+    key = client.put("/api/providers/openrouter", json={"api_key": "sk-super-secret-key"})
     assert key.status_code == 200
 
     agent = client.post(
         "/api/agents",
         json={
             "client_id": client_id,
-            "provider": "openai",
+            "provider": "openrouter",
             "model": "gpt-4.1-mini",
             "name": "Aurora Advisor",
             "instructions": "Only answer questions about the clinic's services.",
@@ -216,10 +224,10 @@ def test_widget_public_chat_and_gating(authenticated_client: TestClient, monkeyp
         "/api/clients",
         json={"name": "Widget Co", "is_active": True},
     ).json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
-        json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Sofia", "instructions": "", "personality": "", "is_active": True},
+        json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Sofia", "instructions": "", "personality": "", "is_active": True},
     ).json()
     # No web chat until the client gets one.
     assert client.get(f"/api/webchat/channels/{customer['id']}").status_code == 404
@@ -334,10 +342,10 @@ def test_usage_recorded_and_reported(authenticated_client: TestClient, monkeypat
         "/api/clients",
         json={"name": "Usage Co", "is_active": True},
     ).json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
-        json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Meter", "instructions": "", "personality": "", "is_active": True},
+        json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Meter", "instructions": "", "personality": "", "is_active": True},
     ).json()
     conversation = client.post("/api/conversations", json={"agent_id": agent["id"]}).json()
 
@@ -383,10 +391,10 @@ def test_agent_qa_pairs_reach_prompt(authenticated_client: TestClient, monkeypat
         "/api/clients",
         json={"name": "FAQ Co", "is_active": True},
     ).json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
-        json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Faq", "instructions": "", "personality": "", "is_active": True},
+        json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Faq", "instructions": "", "personality": "", "is_active": True},
     ).json()
 
     created = client.post(f"/api/agents/{agent['id']}/qa", json={"question": "¿Horario?", "answer": "9am a 6pm"})
@@ -411,11 +419,11 @@ def test_agent_brief_persists_and_reaches_prompt(authenticated_client: TestClien
         "/api/clients",
         json={"name": "Brief Co", "is_active": True},
     ).json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
         json={
-            "client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini",
+            "client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini",
             "name": "Brief", "brief_summary": "A bakery", "brief_donts": "Never promise same-day delivery",
             "is_active": True,
         },
@@ -488,10 +496,10 @@ def test_media_message_uses_image_capability(authenticated_client: TestClient, m
         "/api/clients",
         json={"name": "Pizza Co", "is_active": True},
     ).json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
-        json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "image_enabled": True, "name": "Waiter", "instructions": "", "personality": "", "is_active": True},
+        json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "image_enabled": True, "name": "Waiter", "instructions": "", "personality": "", "is_active": True},
     ).json()
     assert agent["image_enabled"] is True
     conversation = client.post("/api/conversations", json={"agent_id": agent["id"]}).json()
@@ -526,10 +534,10 @@ def test_media_message_without_capability_uses_placeholder(authenticated_client:
         "/api/clients",
         json={"name": "Shop", "is_active": True},
     ).json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
-        json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Bot", "instructions": "", "personality": "", "is_active": True},
+        json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Bot", "instructions": "", "personality": "", "is_active": True},
     ).json()
     conversation = client.post("/api/conversations", json={"agent_id": agent["id"]}).json()
     fake_completion = AsyncMock(return_value=ai_service.Completion(text="Got it"))
@@ -743,10 +751,10 @@ def test_activity_never_reaches_the_model_and_a_resolved_case_stays_closed(authe
         "/api/clients",
         json={"name": "Reopen Co", "is_active": True},
     ).json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
-        json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Host", "instructions": "", "personality": "", "is_active": True},
+        json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Host", "instructions": "", "personality": "", "is_active": True},
     ).json()
     channel = client.put(f"/api/whatsapp/channels/{customer['id']}", json={"agent_id": agent["id"]}).json()
     headers = {"X-Bridge-Token": get_settings().whatsapp_bridge_token}
@@ -824,10 +832,10 @@ def test_idle_ai_conversations_resolve_themselves_but_human_ones_wait(authentica
 
 
 def test_provider_test_returns_models(authenticated_client: TestClient, monkeypatch):
-    authenticated_client.put("/api/providers/openai", json={"api_key": "secret"})
+    authenticated_client.put("/api/providers/openrouter", json={"api_key": "secret"})
     fake = AsyncMock(return_value={"ok": True, "message": "Key verified. 2 models available.", "models": ["model-a", "model-b"]})
     monkeypatch.setattr(providers_router, "test_provider", fake)
-    tested = authenticated_client.post("/api/providers/openai/test")
+    tested = authenticated_client.post("/api/providers/openrouter/test")
     assert tested.status_code == 200
     assert tested.json()["models"] == ["model-a", "model-b"]
 
@@ -838,10 +846,10 @@ def test_whatsapp_inbound_image_uses_capability(authenticated_client: TestClient
         "/api/clients",
         json={"name": "Bistro", "is_active": True},
     ).json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
-        json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "image_enabled": True, "name": "Host", "instructions": "", "personality": "", "is_active": True},
+        json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "image_enabled": True, "name": "Host", "instructions": "", "personality": "", "is_active": True},
     ).json()
     channel = client.put(f"/api/whatsapp/channels/{customer['id']}", json={"agent_id": agent["id"]}).json()
     headers = {"X-Bridge-Token": get_settings().whatsapp_bridge_token}
@@ -881,10 +889,10 @@ def test_whatsapp_channel_inbound_ai_takeover_and_session(authenticated_client: 
         "/api/clients",
         json={"name": "Sol Store", "industry": "retail_ecommerce", "is_active": True},
     ).json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
-        json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Sol Advisor", "instructions": "Help the customers.", "personality": "Friendly", "is_active": True},
+        json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Sol Advisor", "instructions": "Help the customers.", "personality": "Friendly", "is_active": True},
     ).json()
 
     configured = client.put(
@@ -964,7 +972,7 @@ def test_whatsapp_channel_inbound_ai_takeover_and_session(authenticated_client: 
 
 def test_available_models_lists_the_catalog(authenticated_client):
     body = authenticated_client.get("/api/catalog/available").json()
-    assert "gpt-5.6-luna" in body["chat"]["openai"]
-    assert "claude-sonnet-5" in body["chat"]["anthropic"]
-    assert "whisper-1" in body["audio"]
-    assert "gpt-5.6-luna" in body["image"]
+    assert "openai/gpt-5.6-luna" in body["chat"]["openrouter"]
+    assert "anthropic/claude-sonnet-5" in body["chat"]["openrouter"]
+    assert "openai/gpt-4o-mini-transcribe" in body["audio"]
+    assert "openai/gpt-5.6-luna" in body["image"]

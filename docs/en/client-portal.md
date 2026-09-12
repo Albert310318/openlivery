@@ -65,6 +65,16 @@ Instead of the shared `/portal/<slug>` path, you can point the portal at a domai
 
 The on-demand gateway is opt-in. See [Self-hosting](self-hosting.md) for mounting the override and publishing ports 80 and 443.
 
+## Reports
+
+The **Reports** tab (admins only) shows how the inbox is doing over the last 7, 30 or 90 days or a custom range, narrowed by channel, agent or team:
+
+- **Cards**: new conversations, the share resolved by the AI without a person, conversations handed to a person, open now, messages received (split into AI and human replies), contacts reached, average first reply and average resolution time.
+- **Activity per day**: one chart that switches between conversations (started, resolved) and messages (received, AI replies, human replies).
+- **By channel** and **team activity**: replies, assignments and open conversations per agent.
+
+Playground rehearsals and imported archives never count.
+
 ## Archiving and deleting conversations
 
 Conversations are the client's history, so nothing removes them in one step.

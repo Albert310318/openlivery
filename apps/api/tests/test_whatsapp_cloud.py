@@ -62,12 +62,12 @@ def _setup_channel(client: TestClient, *, image_enabled: bool = False) -> tuple[
         "/api/clients",
         json={"name": "Bistro", "is_active": True},
     ).json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
         json={
             "client_id": customer["id"],
-            "provider": "openai",
+            "provider": "openrouter",
             "model": "gpt-4.1-mini",
             "image_enabled": image_enabled,
             "name": "Host",
@@ -480,7 +480,7 @@ def test_configure_channel_refuses_a_number_another_client_uses(authenticated_cl
         "/api/agents",
         json={
             "client_id": other["id"],
-            "provider": "openai",
+            "provider": "openrouter",
             "model": "gpt-4.1-mini",
             "name": "Host",
             "instructions": "",

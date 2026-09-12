@@ -295,8 +295,9 @@ async def _widget_ai_reply(db: Session, agent: Agent, conversation: Conversation
         return None
 
     conversation.updated_at = now_utc()
-    db.add(Message(conversation_id=conversation.id, role="assistant", content=completion.text, sources=knowledge.sources, tool_calls=completion.tool_calls, sender_type="ai", sender_name=agent.name))
-    record_usage(db, agent.agency_id, agent.id, agent.provider, agent.model.strip(), completion)
+    reply = Message(conversation_id=conversation.id, role="assistant", content=completion.text, sources=knowledge.sources, tool_calls=completion.tool_calls, sender_type="ai", sender_name=agent.name)
+    db.add(reply)
+    record_usage(db, agent.agency_id, agent.id, agent.provider, agent.model.strip(), completion, conversation=conversation, message=reply)
     db.commit()
     return completion.text
 

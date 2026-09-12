@@ -256,18 +256,17 @@ async def _generate_reply(
         db, agent, base_url, api_key, messages, temperature=agent.temperature, max_tokens=agent.max_tokens
     )
     note_reply(conversation)
-    db.add(
-        Message(
-            conversation_id=conversation.id,
-            role="assistant",
-            content=completion.text,
-            sources=knowledge.sources,
-            tool_calls=completion.tool_calls,
-            sender_type="ai",
-            sender_name=agent.name,
-        )
+    reply = Message(
+        conversation_id=conversation.id,
+        role="assistant",
+        content=completion.text,
+        sources=knowledge.sources,
+        tool_calls=completion.tool_calls,
+        sender_type="ai",
+        sender_name=agent.name,
     )
-    record_usage(db, agent.agency_id, agent.id, agent.provider, agent.model.strip(), completion)
+    db.add(reply)
+    record_usage(db, agent.agency_id, agent.id, agent.provider, agent.model.strip(), completion, conversation=conversation, message=reply)
     conversation.updated_at = now_utc()
     db.commit()
     return _conversation(db, user, conversation.id)

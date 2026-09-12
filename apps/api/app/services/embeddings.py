@@ -1,6 +1,6 @@
 """Embeddings for semantic retrieval over an agent's knowledge base.
 
-Uses the agency's OpenAI key (`{base_url}/embeddings`). Any failure (no key,
+Uses the agency's provider key (`{base_url}/embeddings`). Any failure (no key,
 network, bad response) returns None so the caller can fall back to keyword
 search — embeddings never block a document upload or a reply.
 """
@@ -9,15 +9,17 @@ import math
 
 import httpx
 
+from .ai import auth_headers
 
-DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+
+DEFAULT_EMBEDDING_MODEL = "openai/text-embedding-3-small"
 
 
 async def embed_texts(base_url: str, api_key: str, texts: list[str]) -> list[list[float]] | None:
     if not texts:
         return []
     url = f"{base_url.rstrip('/')}/embeddings"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    headers = auth_headers(api_key)
     payload = {"model": DEFAULT_EMBEDDING_MODEL, "input": texts}
     try:
         async with httpx.AsyncClient(timeout=60) as client:

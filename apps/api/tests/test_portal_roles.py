@@ -83,10 +83,10 @@ def test_an_agent_works_the_inbox_but_manages_nothing(authenticated_client: Test
     _person(client, customer, "helper@roles.co")
     _open_portal(client, customer)
     slug = customer["portal_slug"]
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
-        json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Beto", "is_active": True},
+        json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Beto", "is_active": True},
     ).json()
     conversation_id = customer_conversation(client, agent["id"])["id"]
 

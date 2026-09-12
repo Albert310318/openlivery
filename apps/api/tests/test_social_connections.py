@@ -36,8 +36,8 @@ def messaging_config(monkeypatch):
 
 def resources(client):
     customer = client.post("/api/clients", json={"name": "Shop", "is_active": True}).json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
-    agent = client.post("/api/agents", json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Support", "instructions": "", "personality": "", "is_active": True}).json()
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
+    agent = client.post("/api/agents", json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Support", "instructions": "", "personality": "", "is_active": True}).json()
     return customer, agent
 
 

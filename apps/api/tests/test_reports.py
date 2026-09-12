@@ -57,6 +57,9 @@ def test_reports_aggregate_the_range(authenticated_client: TestClient, monkeypat
     assert report["active_contacts"] == 1 and report["agents_online"] == 1
     assert report["avg_first_reply_seconds"] == 60.0
     assert len(report["by_day"]) == 7 and sum(d["started"] for d in report["by_day"]) == 1
+    assert sum(d["inbound"] for d in report["by_day"]) == 1 and sum(d["human_replies"] for d in report["by_day"]) == 1
+    # Opened from the portal, so a person had it from the start and the AI resolved nothing.
+    assert report["handoffs"] == 1 and report["ai_resolved"] == 0
     assert report["by_channel"] == [{"channel": "whatsapp", "started": 1}]
     ana = report["by_agent"][0]
     assert ana["name"] == "Ana" and ana["replies"] == 1 and ana["assigned"] == 1 and ana["open_now"] == 0

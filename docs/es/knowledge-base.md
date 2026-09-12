@@ -13,7 +13,7 @@ Consulta [Agentes](agents.md) para ver dónde se gestionan en el editor del agen
 
 ## Cómo se procesan los PDFs
 
-Cuando subes un PDF, su texto se extrae de inmediato con `pypdf` y se guarda en el documento. Si no se puede extraer texto (por ejemplo, un PDF escaneado que solo contiene imágenes), el documento se marca como `error` y no se utiliza. El texto extraído se divide luego en fragmentos del tamaño de un párrafo. Cuando hay disponible una conexión compatible con OpenAI que soporta embeddings, cada fragmento se convierte en un vector que se guarda junto a él; el embedding es de mejor esfuerzo, así que si no está disponible el agente sigue funcionando mediante búsqueda por palabras clave.
+Cuando subes un PDF, su texto se extrae de inmediato con `pypdf` y se guarda en el documento. Si no se puede extraer texto (por ejemplo, un PDF escaneado que solo contiene imágenes), el documento se marca como `error` y no se utiliza. El texto extraído se divide luego en fragmentos del tamaño de un párrafo. Cuando la agencia tiene una clave de OpenRouter, cada fragmento se convierte en un vector con `openai/text-embedding-3-small` que se guarda junto a él; el embedding es de mejor esfuerzo, así que si no está disponible el agente sigue funcionando mediante búsqueda por palabras clave.
 
 ## Cómo funciona la recuperación
 

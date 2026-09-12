@@ -25,7 +25,8 @@ from .knowledge import contact_context, build_system_prompt, retrieve_knowledge
 from .media import audio_filename, describe_image, transcribe_audio
 from .notifications import notify_needs_human
 from .routing import route_new_conversation_by_tags
-from .providers import resolve_agent_credentials, resolve_provider_credentials
+from .model_catalog import DEFAULT_AUDIO_MODEL
+from .providers import DEFAULT_PROVIDER, resolve_agent_credentials, resolve_provider_credentials
 from .tools import run_completion
 from .usage import record_usage
 from .escalation import (
@@ -89,7 +90,7 @@ async def resolve_inbound_content(db: Session, agent: Agent, inbound: InboundMes
     enabled = (inbound.media_kind == "image" and agent.image_enabled) or (
         inbound.media_kind == "audio" and agent.audio_enabled
     )
-    credentials = resolve_provider_credentials(db, agent.agency_id, "openai")
+    credentials = resolve_provider_credentials(db, agent.agency_id, DEFAULT_PROVIDER)
     if not enabled or not credentials:
         return text, text or _media_placeholder(inbound.media_kind)
     try:
@@ -103,7 +104,7 @@ async def resolve_inbound_content(db: Session, agent: Agent, inbound: InboundMes
             )
             description = await describe_image(base_url, api_key, model, data, inbound.media_mime or "image/jpeg", instruction)
             return text, (f"{text}\n\n" if text else "") + f"[Imagen recibida] {description}"
-        model = agent.audio_model.strip() or "whisper-1"
+        model = agent.audio_model.strip() or DEFAULT_AUDIO_MODEL
         mime = inbound.media_mime or "audio/ogg"
         transcript = await transcribe_audio(base_url, api_key, model, data, audio_filename(mime), mime)
         return text, (f"{text}\n\n" if text else "") + (transcript or _media_placeholder("audio"))
@@ -440,7 +441,7 @@ async def _reply_with_ai(db: Session, channel, conversation: Conversation, retri
         if (conversation.mode == "human" or conversation.status == "resolved" or not channel.is_enabled
                 or (last_message and last_message.role != "user")
                 or (expected_last_message_id and (not last_message or last_message.id != expected_last_message_id))):
-            record_usage(db, agent.agency_id, agent.id, agent.provider, agent.model.strip(), completion)
+            record_usage(db, agent.agency_id, agent.id, agent.provider, agent.model.strip(), completion, conversation=conversation)
             db.commit()
             return InboundResult(accepted=True, conversation_id=conversation.id, mode=conversation.mode)
     if conversation.channel in ("instagram", "messenger"):
@@ -453,7 +454,7 @@ async def _reply_with_ai(db: Session, channel, conversation: Conversation, retri
             if expected_last_message_id and (not last_message or last_message.id != expected_last_message_id):
                 raise HTTPException(status_code=409, detail="The conversation changed while generating the reply.")
         except HTTPException:
-            record_usage(db, agent.agency_id, agent.id, agent.provider, agent.model.strip(), completion)
+            record_usage(db, agent.agency_id, agent.id, agent.provider, agent.model.strip(), completion, conversation=conversation)
             db.commit()
             return InboundResult(accepted=True, conversation_id=conversation.id, mode=conversation.mode)
     quoted_message_id: uuid.UUID | None = None
@@ -481,7 +482,7 @@ async def _reply_with_ai(db: Session, channel, conversation: Conversation, retri
         if conversation.channel in ("instagram", "messenger"):
             from .social_delivery import queue_message
             queue_message(db, conversation, outbound)
-    record_usage(db, agent.agency_id, agent.id, agent.provider, agent.model.strip(), completion)
+    record_usage(db, agent.agency_id, agent.id, agent.provider, agent.model.strip(), completion, conversation=conversation, message=outbound)
     conversation.updated_at = now_utc()
     channel.last_error = None
     if escalation_holder and conversation.channel in ("instagram", "messenger"):

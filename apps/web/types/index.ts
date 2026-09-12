@@ -272,9 +272,11 @@ export type PortalReport = {
   ai_replies: number;
   active_contacts: number;
   agents_online: number;
+  handoffs: number;
+  ai_resolved: number;
   avg_first_reply_seconds: number | null;
   avg_resolution_seconds: number | null;
-  by_day: { date: string; started: number; resolved: number }[];
+  by_day: { date: string; started: number; resolved: number; inbound: number; ai_replies: number; human_replies: number }[];
   by_channel: { channel: string; started: number }[];
   by_agent: { name: string; availability: string; replies: number; assigned: number; open_now: number }[];
 };
@@ -402,4 +404,38 @@ export type SocialHistoryJob = {
   limited: boolean;
   created_at: string;
   updated_at: string;
+};
+
+export type ReportGroup = { id: string | null; name: string; replies: number; input_tokens: number; output_tokens: number; cost_usd: number };
+
+export type CostReport = {
+  totals: { cost_usd: number; replies: number; conversations: number; input_tokens: number; output_tokens: number; avg_cost_per_reply_usd: number };
+  by_client: ReportGroup[];
+  by_agent: ReportGroup[];
+  by_model: ReportGroup[];
+  by_day: { date: string; replies: number; cost_usd: number }[];
+  tz: string;
+};
+
+export type ReportReply = {
+  id: string;
+  created_at: string;
+  conversation_id: string | null;
+  contact_name: string | null;
+  client_id: string | null;
+  client_name: string | null;
+  agent_id: string | null;
+  agent_name: string | null;
+  channel: string | null;
+  model: string;
+  served_by: string;
+  input_tokens: number;
+  output_tokens: number;
+  cached_tokens: number;
+  reasoning_tokens: number;
+  cost_usd: number;
+  estimated: boolean;
+  duration_ms: number | null;
+  tools: number;
+  tool_errors: number;
 };

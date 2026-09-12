@@ -22,7 +22,7 @@ def test_disclosure_is_client_scoped_and_includes_separate_media_provider(authen
     other = authenticated_client.post("/api/clients", json={"name": "Other business"}).json()
     with TestingSession() as db:
         owner = db.get(Client, uuid.UUID(customer["id"]))
-        agent = Agent(client_id=owner.id, agency_id=owner.agency_id, name="Support", provider="anthropic", is_active=False)
+        agent = Agent(client_id=owner.id, agency_id=owner.agency_id, name="Support", provider="openrouter", is_active=False)
         foreign = Agent(client_id=uuid.UUID(other["id"]), agency_id=owner.agency_id, name="Other")
         db.add_all([agent, foreign])
         db.flush()
@@ -35,9 +35,9 @@ def test_disclosure_is_client_scoped_and_includes_separate_media_provider(authen
     monkeypatch.setattr(providers, "decrypt_secret", lambda *_: pytest.fail("Disclosure must not decrypt a key"))
     result = _login(authenticated_client)
     rows = result["privacy"]["destinations"]
-    assert {row["host"] for row in rows} == {"api.anthropic.com", "api.openai.com", "calendar.example.test"}
-    assert next(row for row in rows if row["name"] == "OpenAI")["capabilities"] == ["audio", "image"]
-    assert next(row for row in rows if row["name"] == "Anthropic")["capabilities"] == ["conversation"]
+    assert {row["host"] for row in rows} == {"openrouter.ai", "calendar.example.test"}
+    # Conversation, image and audio all go through the same provider.
+    assert next(row for row in rows if row["name"] == "OpenRouter")["capabilities"] == ["audio", "conversation", "image"]
     for hidden in ("private-password", "private-path", "secret", "foreign.example.test", "disabled.example.test"):
         assert hidden not in str(result["privacy"])
     refreshed = authenticated_client.get("/api/mobile/session", headers={"Authorization": f"Bearer {result['token']}"})
@@ -49,7 +49,7 @@ def test_destination_or_capability_change_updates_disclosure_version(authenticat
     before = _login(authenticated_client)["privacy"]
     with TestingSession() as db:
         owner = db.get(Client, uuid.UUID(customer["id"]))
-        agent = Agent(client_id=owner.id, agency_id=owner.agency_id, name="Support", provider="openai")
+        agent = Agent(client_id=owner.id, agency_id=owner.agency_id, name="Support", provider="openrouter")
         db.add(agent)
         db.commit()
         agent_id = agent.id

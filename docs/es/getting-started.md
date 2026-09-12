@@ -37,8 +37,8 @@ API_PORT=8001 WEB_PORT=3001 DB_PORT=5433 make up
 ## Primeros pasos
 
 1. **Crea tu agencia** en la primera pantalla — es el espacio de trabajo principal que posee todo lo demás.
-2. Abre **Ajustes** y añade una clave de OpenAI y/o Anthropic. La clave se verifica al guardarla. Consulta [Proveedores de IA](ai-providers.md).
-3. Crea un **cliente** y luego un **agente** para ese cliente: elige proveedor y modelo, y escribe las instrucciones del agente. Consulta [Agentes](agents.md).
+2. Abre **Ajustes** y añade tu clave de OpenRouter. La clave se verifica al guardarla. Consulta [Proveedores de IA](ai-providers.md).
+3. Crea un **cliente** y luego un **agente** para ese cliente: elige un modelo y escribe las instrucciones del agente. Consulta [Agentes](agents.md).
 4. Añade conocimiento (contexto, pares de preguntas y respuestas, PDFs) y opcionalmente activa la comprensión de imágenes o audio. Consulta [Base de conocimiento](knowledge-base.md).
 5. Abre el **Playground** para chatear con el agente, y luego conecta un número de [WhatsApp](whatsapp.md) o integra el [widget web](web-widget.md).
 

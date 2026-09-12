@@ -15,8 +15,8 @@ def setup(client, monkeypatch):
     monkeypatch.setattr(graph, "verify_account", AsyncMock(return_value={"id": "111", "name": "Shop", "scopes": list(graph.SCOPES["instagram"])}))
     monkeypatch.setattr(graph, "subscribe", AsyncMock(return_value=True))
     customer = client.post("/api/clients", json={"name": "Shop", "is_active": True}).json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
-    agent = client.post("/api/agents", json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Support", "instructions": "", "personality": "", "is_active": True}).json()
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
+    agent = client.post("/api/agents", json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Support", "instructions": "", "personality": "", "is_active": True}).json()
     response = client.put(f"/api/social/instagram/channels/{customer['id']}", json={"agent_id": agent["id"], "external_account_id": "111", "app_id": "999", "access_token": "private-token", "app_secret": "secret"})
     assert response.status_code == 200
     assert client.post(f"/api/social/instagram/channels/{customer['id']}/connect").status_code == 200

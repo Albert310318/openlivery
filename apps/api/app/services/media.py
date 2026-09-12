@@ -3,7 +3,7 @@ import base64
 import httpx
 from fastapi import HTTPException
 
-from .ai import _safe_provider_error, extract_openai_text
+from .ai import _safe_provider_error, auth_headers, chat_url, extract_chat_text
 
 
 # Transcription providers sniff the container from the file name, so a browser
@@ -45,9 +45,10 @@ async def transcribe_audio(
     """Transcribe an audio clip via an OpenAI-compatible /audio/transcriptions endpoint."""
     url = f"{base_url.rstrip('/')}/audio/transcriptions"
     files = {"file": (filename, audio, content_type), "model": (None, model)}
+    headers = {key: value for key, value in auth_headers(api_key).items() if key != "Content-Type"}
     try:
         async with httpx.AsyncClient(timeout=120) as client:
-            response = await client.post(url, headers={"Authorization": f"Bearer {api_key}"}, files=files)
+            response = await client.post(url, headers=headers, files=files)
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="Could not reach the transcription provider.") from exc
     if response.status_code >= 400:
@@ -66,29 +67,28 @@ async def describe_image(
     content_type: str,
     instruction: str,
 ) -> str:
-    """Describe an image with an OpenAI vision model via the Responses API."""
+    """Describe an image with a vision model via chat completions."""
     data_url = f"data:{content_type};base64,{base64.b64encode(image).decode()}"
     payload = {
         "model": model,
-        "input": [
+        "messages": [
             {
                 "role": "user",
                 "content": [
-                    {"type": "input_text", "text": instruction},
-                    {"type": "input_image", "image_url": data_url},
+                    {"type": "text", "text": instruction},
+                    {"type": "image_url", "image_url": {"url": data_url}},
                 ],
             }
         ],
     }
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     try:
         async with httpx.AsyncClient(timeout=120) as client:
-            response = await client.post(f"{base_url.rstrip('/')}/responses", headers=headers, json=payload)
+            response = await client.post(chat_url(base_url), headers=auth_headers(api_key), json=payload)
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="Could not reach the vision provider.") from exc
     if response.status_code >= 400:
         raise HTTPException(status_code=502, detail=f"Image analysis failed: {_safe_provider_error(response)}")
     try:
-        return extract_openai_text(response.json())
+        return extract_chat_text(response.json())
     except (ValueError, KeyError, IndexError) as exc:
         raise HTTPException(status_code=502, detail="Invalid image analysis response.") from exc

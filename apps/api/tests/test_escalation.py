@@ -25,10 +25,10 @@ def _setup(client: TestClient, company: str, member_names: list[str]):
     client.patch(f"/api/clients/{customer['id']}/portal", json={"portal_enabled": True})
     client.post(f"/api/portal/{slug}/login", json={"email": f"user0@{slug}.com", "password": "secure-portal"})
     members = client.get(f"/api/portal/{slug}/members").json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
-        json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Beto", "instructions": "", "personality": "", "is_active": True},
+        json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Beto", "instructions": "", "personality": "", "is_active": True},
     ).json()
     channel = client.put(f"/api/whatsapp/channels/{customer['id']}", json={"agent_id": agent["id"]}).json()
     return customer, slug, members, agent, channel

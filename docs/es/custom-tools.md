@@ -28,7 +28,7 @@ Antes de guardar un servidor debes ejecutar **Probar conexión**, que conecta, r
 
 ## Cómo funciona el tool calling
 
-Cuando un agente con herramientas activas recibe un mensaje, OpenLivery envía las definiciones de las herramientas al modelo junto con la conversación. Si el modelo decide llamar una herramienta, OpenLivery la ejecuta (la petición HTTP, o una llamada proxied al servidor MCP), le devuelve el resultado y deja que el modelo continúe — hasta **5 rondas** por respuesta, tras las cuales el modelo debe responder con texto. Funciona con ambos proveedores: OpenAI (Responses API) y Anthropic (Messages API). El uso de tokens de todas las rondas se suma en el registro de uso de la respuesta.
+Cuando un agente con herramientas activas recibe un mensaje, OpenLivery envía las definiciones de las herramientas al modelo junto con la conversación. Si el modelo decide llamar una herramienta, OpenLivery la ejecuta (la petición HTTP, o una llamada proxied al servidor MCP), le devuelve el resultado y deja que el modelo continúe — hasta **5 rondas** por respuesta, tras las cuales el modelo debe responder con texto. Las herramientas viajan como definiciones de función de chat completions, que es lo que OpenRouter habla para todos los proveedores, así que cualquier modelo con soporte de herramientas funciona. El uso de tokens y el costo de todas las rondas se suman en el registro de uso de la respuesta.
 
 Cada respuesta del asistente guarda qué herramientas se ejecutaron, con sus argumentos y una vista previa de cada resultado. En el playground verás un chip bajo la respuesta con las herramientas usadas; las llamadas fallidas se resaltan y muestran el detalle del error, para diagnosticar una herramienta rota sin leer logs.
 

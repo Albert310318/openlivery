@@ -65,6 +65,16 @@ En lugar de la ruta compartida `/portal/<slug>`, puedes apuntar el portal a un d
 
 La pasarela bajo demanda es opcional. Consulta [Self-hosting](self-hosting.md) para montar el override y publicar los puertos 80 y 443.
 
+## Reportes
+
+La pestaña **Reportes** (solo administradores) muestra cómo va la bandeja en los últimos 7, 30 o 90 días o en un rango propio, filtrado por canal, agente o equipo:
+
+- **Tarjetas**: conversaciones nuevas, el porcentaje resuelto por la IA sin intervención humana, conversaciones pasadas a una persona, abiertas ahora, mensajes recibidos (con el reparto entre respuestas de la IA y humanas), contactos alcanzados, primera respuesta y tiempo de resolución promedio.
+- **Actividad por día**: una sola gráfica que alterna entre conversaciones (iniciadas, resueltas) y mensajes (recibidos, respuestas de la IA, respuestas humanas).
+- **Por canal** y **actividad del equipo**: respuestas, asignaciones y conversaciones abiertas por agente.
+
+Los ensayos del playground y los archivos importados nunca cuentan.
+
 ## Archivar y eliminar conversaciones
 
 Las conversaciones son el historial del cliente, así que nada las quita en un solo paso.

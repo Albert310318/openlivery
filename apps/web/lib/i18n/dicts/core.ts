@@ -73,6 +73,7 @@ const en = {
     playground: "Playground",
     inbox: "Inbox",
     channels: "Channels",
+    reports: "Reports",
     settings: "Settings",
   },
   shell: {
@@ -214,6 +215,7 @@ const es: typeof en = {
     playground: "Playground",
     inbox: "Inbox",
     channels: "Canales",
+    reports: "Reportes",
     settings: "Configuración",
   },
   shell: {

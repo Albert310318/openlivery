@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
+from .services.model_catalog import DEFAULT_AUDIO_MODEL
 
 
 class ORMModel(BaseModel):
@@ -210,7 +211,7 @@ class AgentBase(BaseModel):
     brief_dos: str = ""
     brief_donts: str = ""
     model: str = ""
-    provider: str = Field(default="openai", pattern=r"^(openai|anthropic)$")
+    provider: str = Field(default="openrouter", pattern=r"^(openrouter)$")
     prompt_language: str = Field(default="es", pattern=r"^(en|es)$")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int = Field(default=2048, ge=1, le=32000)
@@ -220,7 +221,7 @@ class AgentBase(BaseModel):
     image_enabled: bool = True
     image_model: str = Field(default="", max_length=180)
     audio_enabled: bool = True
-    audio_model: str = Field(default="whisper-1", max_length=180)
+    audio_model: str = Field(default=DEFAULT_AUDIO_MODEL, max_length=180)
     is_active: bool = True
 
     @model_validator(mode="after")
@@ -245,7 +246,7 @@ class AgentUpdate(BaseModel):
     brief_dos: str | None = None
     brief_donts: str | None = None
     model: str | None = None
-    provider: str | None = Field(default=None, pattern=r"^(openai|anthropic)$")
+    provider: str | None = Field(default=None, pattern=r"^(openrouter)$")
     prompt_language: str | None = Field(default=None, pattern=r"^(en|es)$")
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     max_tokens: int | None = Field(default=None, ge=1, le=32000)
@@ -606,6 +607,9 @@ class ReportDay(BaseModel):
     date: date
     started: int = 0
     resolved: int = 0
+    inbound: int = 0
+    ai_replies: int = 0
+    human_replies: int = 0
 
 
 class ReportChannelRow(BaseModel):
@@ -630,6 +634,8 @@ class PortalReport(BaseModel):
     ai_replies: int
     active_contacts: int
     agents_online: int
+    handoffs: int = 0
+    ai_resolved: int = 0
     avg_first_reply_seconds: float | None = None
     avg_resolution_seconds: float | None = None
     by_day: list[ReportDay]
@@ -815,6 +821,69 @@ class ModelUsage(BaseModel):
     model: str
     input_tokens: int
     output_tokens: int
+
+
+class ReportTotals(BaseModel):
+    cost_usd: float
+    replies: int
+    conversations: int
+    input_tokens: int
+    output_tokens: int
+    avg_cost_per_reply_usd: float
+
+
+class ReportGroup(BaseModel):
+    id: str | None
+    name: str
+    replies: int
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
+
+
+class CostReportDay(BaseModel):
+    date: str
+    replies: int
+    cost_usd: float
+
+
+class CostReport(BaseModel):
+    totals: ReportTotals
+    by_client: list[ReportGroup]
+    by_agent: list[ReportGroup]
+    by_model: list[ReportGroup]
+    by_day: list[CostReportDay]
+    tz: str
+
+
+class ReportReply(BaseModel):
+    id: uuid.UUID
+    created_at: datetime
+    conversation_id: uuid.UUID | None
+    contact_name: str | None
+    client_id: uuid.UUID | None
+    client_name: str | None
+    agent_id: uuid.UUID | None
+    agent_name: str | None
+    channel: str | None
+    model: str
+    served_by: str
+    input_tokens: int
+    output_tokens: int
+    cached_tokens: int
+    reasoning_tokens: int
+    cost_usd: float
+    # True when the provider reported no cost and the catalog's list price
+    # was used instead.
+    estimated: bool
+    duration_ms: int | None
+    tools: int
+    tool_errors: int
+
+
+class RepliesPage(BaseModel):
+    items: list[ReportReply]
+    total: int
 
 
 class DashboardMetrics(BaseModel):

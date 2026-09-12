@@ -27,12 +27,12 @@ def _setup_channel(client: TestClient) -> None:
             "is_active": True,
         },
     ).json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
         json={
             "client_id": customer["id"],
-            "provider": "openai",
+            "provider": "openrouter",
             "model": "gpt-4.1-mini",
             "name": "Sol Advisor",
             "instructions": "Help the customers.",

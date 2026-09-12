@@ -73,7 +73,7 @@ def disclosure(db: Session, client: Client) -> MobilePrivacy:
             ("image", agent.image_enabled), ("audio", agent.audio_enabled),
         ) if enabled]
         if media:
-            name, host = provider_destination(db, client.agency_id, "openai")
+            name, host = provider_destination(db, client.agency_id, providers.DEFAULT_PROVIDER)
             add("ai", name, host, media)
     for tool_type, url in db.execute(
         select(AgentTool.type, AgentTool.url).join(Agent, Agent.id == AgentTool.agent_id)

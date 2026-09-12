@@ -27,10 +27,10 @@ def _portal_with_members(client: TestClient, names: list[str], company: str = "T
 
 
 def _conversation(client: TestClient, customer: dict, slug: str, title_hint: str = "hola") -> str:
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
-        json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Beto", "instructions": "", "personality": "", "is_active": True},
+        json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Beto", "instructions": "", "personality": "", "is_active": True},
     ).json()
     conversation = customer_conversation(client, agent["id"])
     return conversation["id"]
@@ -141,10 +141,10 @@ def test_escalation_rules_replace_and_validate(authenticated_client: TestClient)
     client = authenticated_client
     customer, slug, members = _portal_with_members(client, ["Ana"], company="Rules Co")
     team = client.post(f"/api/portal/{slug}/teams", json={"name": "Ventas", "member_ids": [members[0]["id"]]}).json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
-        json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Beto", "instructions": "", "personality": "", "is_active": True},
+        json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Beto", "instructions": "", "personality": "", "is_active": True},
     ).json()
     base = f"/api/agents/{agent['id']}/escalation-rules"
 

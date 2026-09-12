@@ -23,7 +23,8 @@ Everything you need to build, brand and operate AI agents for your clients.
 
 - [Agents](en/agents.md) — Instructions, context, models and multimodal capabilities.
 - [Knowledge base](en/knowledge-base.md) — Manual context, Q&A pairs, PDFs and semantic retrieval.
-- [AI providers](en/ai-providers.md) — Connect OpenAI and Anthropic keys and pick per-agent models.
+- [AI providers](en/ai-providers.md) — Connect your OpenRouter key and pick per-agent models from any vendor.
+- [Reports](en/reports.md) — What every reply cost, by client, agent, model and day, with CSV export.
 - [Custom tools](en/custom-tools.md) — Let agents call HTTP endpoints and MCP servers during a conversation.
 
 **Channels**
@@ -61,7 +62,8 @@ Todo lo que necesitas para construir, marcar y operar agentes de IA para tus cli
 
 - [Agentes](es/agents.md) — Instrucciones, contexto, modelos y capacidades multimodales.
 - [Base de conocimiento](es/knowledge-base.md) — Contexto manual, pares de preguntas y respuestas, PDFs y recuperación semántica.
-- [Proveedores de IA](es/ai-providers.md) — Conecta claves de OpenAI y Anthropic y elige modelos por agente.
+- [Proveedores de IA](es/ai-providers.md) — Conecta tu clave de OpenRouter y elige modelos de cualquier proveedor por agente.
+- [Reportes](es/reports.md) — Lo que costó cada respuesta, por cliente, agente, modelo y día, con exportación CSV.
 - [Herramientas personalizadas](es/custom-tools.md) — Permite que los agentes llamen endpoints HTTP y servidores MCP durante una conversación.
 
 **Canales**

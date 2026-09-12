@@ -1,4 +1,11 @@
-"""Supported AI providers (bring your own key, one per agency)."""
+"""The AI provider: OpenRouter, bring your own key, one per agency.
+
+OpenRouter fronts every vendor (OpenAI, Anthropic, Google, ...) behind one
+OpenAI-compatible API, so an agency configures a single key and picks any
+model by its OpenRouter slug (``openai/gpt-5.6-luna``, ``anthropic/claude-sonnet-5``).
+The registry keeps its dict shape so a deployment can still swap the base URL
+or resolve credentials differently without touching the call sites.
+"""
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -8,10 +15,10 @@ from ..security import decrypt_secret
 
 
 PROVIDERS: dict[str, dict[str, str]] = {
-    "openai": {"label": "OpenAI", "base_url": "https://api.openai.com/v1"},
-    "anthropic": {"label": "Anthropic", "base_url": "https://api.anthropic.com/v1"},
+    "openrouter": {"label": "OpenRouter", "base_url": "https://openrouter.ai/api/v1"},
 }
 SUPPORTED = tuple(PROVIDERS)
+DEFAULT_PROVIDER = "openrouter"
 
 
 def base_url_for(provider: str) -> str:

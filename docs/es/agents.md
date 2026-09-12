@@ -20,18 +20,18 @@ Los agentes nuevos se crean mediante un asistente de cinco pasos (**Agents → N
 
 Las plantillas iniciales incluidas son Pedidos de restaurante, Leads inmobiliarios, Citas de clínica, Soporte de tienda online y Atención al cliente. Después de crearlo refinas todo en la página de detalle del agente, donde **Básicos** reúne cliente, nombre, brief del negocio, trabajo del agente, escalamiento y modelo. La sección del modelo muestra cuántos tokens cuesta el prompt compuesto en cada mensaje. Crear un cliente termina en el asistente con ese cliente preseleccionado.
 
-## Elegir proveedor y modelo
+## Elegir modelo
 
-Cada agente usa un proveedor — `openai` o `anthropic` — y un modelo de ese proveedor. Se utiliza la clave API almacenada de la agencia para ese proveedor, así que añade tus claves primero. Consulta [Proveedores de IA](ai-providers.md) para ver los modelos disponibles y cómo se configuran las claves. El campo de modelo acepta un valor personalizado si usas un modelo que no está en la lista de presets.
+Cada agente elige un modelo por su slug de OpenRouter (`openai/gpt-5.6-luna`, `anthropic/claude-sonnet-5`, `google/gemini-3.8-flash`). Se utiliza la clave de OpenRouter almacenada de la agencia, así que añádela primero. Consulta [Proveedores de IA](ai-providers.md) para ver los modelos disponibles y cómo se configura la clave. El campo de modelo acepta cualquier slug escrito a mano si el modelo que quieres no está en la lista de presets.
 
 ## Capacidades multimodales
 
 Un agente entiende los medios entrantes desde el inicio: ambas capacidades vienen activas en los agentes nuevos. Cada una tiene su propio interruptor y su propio ajuste de modelo, independiente del modelo de chat principal, dentro de las opciones avanzadas de la sección del modelo:
 
 - **Reconocimiento de imágenes (visión)** — cuando `image_enabled` está activo, las imágenes entrantes se describen con el modelo de `image_model` antes de llegar al agente.
-- **Transcripción de audio** — cuando `audio_enabled` está activo, el audio entrante se transcribe con el modelo de `audio_model` (por defecto `whisper-1`) antes de llegar al agente.
+- **Transcripción de audio** — cuando `audio_enabled` está activo, el audio entrante se transcribe con el modelo de `audio_model` (por defecto `openai/gpt-4o-mini-transcribe`) antes de llegar al agente.
 
-Ambas funciones usan modelos de OpenAI, por lo que requieren una clave de OpenAI sin importar el proveedor de chat del agente.
+Ambas funciones pasan por la misma clave de OpenRouter que el modelo de chat.
 
 ## Ajustes del agente
 
@@ -45,8 +45,8 @@ Ambas funciones usan modelos de OpenAI, por lo que requieren una clave de OpenAI
 | Contacto | de la conversación | Nombre, teléfono, correo, etiquetas y canal de quien escribe, añadidos al prompt al responder para que un registro, un correo o una herramienta los reciba en vez de "no especificado". Solo se lista lo que la ficha del contacto tiene. No aparece en el playground. |
 | Idioma del prompt | `prompt_language` | `es` o `en`: el idioma de los títulos y frases fijas del prompt. Se toma del idioma de la interfaz al guardar el agente. |
 | Zona horaria | `timezone` (en el cliente) | Zona horaria IANA del negocio (p. ej. `America/Bogota`), inyectada para que todos los agentes del cliente conozcan la fecha y hora locales. Se define en el cliente, por defecto `UTC`. |
-| Proveedor | `provider` | `openai` o `anthropic`. |
-| Modelo | `model` | El modelo de chat usado para las respuestas. |
+| Proveedor | `provider` | Siempre `openrouter`. |
+| Modelo | `model` | El modelo de chat usado para las respuestas, como slug de OpenRouter. |
 | Temperatura | `temperature` | Aleatoriedad del muestreo, `0.0`–`2.0` (por defecto `0.7`). |
 | Tokens máximos | `max_tokens` | Máximo de tokens por respuesta, `1`–`32000` (por defecto `2048`). |
 | Límite de memoria | `memory_limit` | Cuántos mensajes pasados se conservan como memoria de conversación, `0`–`200` (por defecto `30`). |

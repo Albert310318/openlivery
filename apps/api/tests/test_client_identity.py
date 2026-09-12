@@ -40,10 +40,10 @@ def test_client_industry_and_type_are_validated_against_the_catalog(authenticate
 def test_prompt_names_the_business_type_and_previews_without_knowledge(authenticated_client: TestClient, monkeypatch):
     client = authenticated_client
     customer = client.post("/api/clients", json={"name": "FinancialCoach", "industry": "finance_insurance", "business_type": "accounting_tax"}).json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
-        json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Ramiro", "instructions": "Book tax appointments.", "is_active": True},
+        json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Ramiro", "instructions": "Book tax appointments.", "is_active": True},
     ).json()
 
     preview = client.get(f"/api/agents/{agent['id']}/prompt")
@@ -120,10 +120,10 @@ def test_the_client_timezone_is_validated_and_reaches_every_agent(authenticated_
     assert client.post("/api/clients", json={"name": "Nowhere", "timezone": "Mars/Olympus"}).status_code == 422
     customer = client.post("/api/clients", json={"name": "Bogota Co", "timezone": "America/Bogota"}).json()
     assert customer["timezone"] == "America/Bogota"
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
-        json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Ramiro", "instructions": "x", "is_active": True},
+        json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Ramiro", "instructions": "x", "is_active": True},
     ).json()
     assert "timezone" not in agent
     assert "America/Bogota" in client.get(f"/api/agents/{agent['id']}/prompt").json()["prompt"]

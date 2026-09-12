@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from .. import industries
 from ..models import Agent, KnowledgeChunk, KnowledgeDocument
 from .embeddings import cosine_similarity, embed_query, embed_texts
-from .providers import resolve_provider_credentials
+from .providers import DEFAULT_PROVIDER, resolve_provider_credentials
 
 
 MAX_FULL_CONTEXT_CHARS = 45_000
@@ -93,7 +93,7 @@ async def embed_document_chunks(db: Session, agent: Agent, document: KnowledgeDo
     """
     if not document.extracted_text.strip():
         return 0
-    credentials = resolve_provider_credentials(db, agent.agency_id, "openai")
+    credentials = resolve_provider_credentials(db, agent.agency_id, DEFAULT_PROVIDER)
     if not credentials:
         return 0
     pieces = _chunks(document.extracted_text)
@@ -137,7 +137,7 @@ async def retrieve_knowledge(db: Session, agent: Agent, query: str) -> Knowledge
 
 
 async def _semantic_search(db: Session, agent: Agent, query: str) -> KnowledgeResult | None:
-    credentials = resolve_provider_credentials(db, agent.agency_id, "openai")
+    credentials = resolve_provider_credentials(db, agent.agency_id, DEFAULT_PROVIDER)
     if not credentials:
         return None
     chunks = list(

@@ -11,7 +11,7 @@ from app.routers import agent_tools as agent_tools_router
 from app.security import encrypt_secret
 from app.services import ai as ai_module
 from app.services.tools import http_exec as http_exec_module
-from app.services.tools.loop import MAX_TOOL_ITERATIONS, anthropic_tool_loop, openai_tool_loop
+from app.services.tools.loop import MAX_TOOL_ITERATIONS, tool_loop
 from app.services.tools.specs import build_tool_specs
 
 
@@ -20,11 +20,11 @@ def _setup_agent(client: TestClient) -> str:
         "/api/clients",
         json={"name": "Tools Co", "is_active": True},
     ).json()
-    client.put("/api/providers/openai", json={"api_key": "secret"})
+    client.put("/api/providers/openrouter", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
         json={
-            "client_id": customer["id"], "provider": "openai", "model": "gpt-5", "name": "Toolo",
+            "client_id": customer["id"], "provider": "openrouter", "model": "gpt-5", "name": "Toolo",
             "instructions": "", "personality": "", "is_active": True,
         },
     ).json()
@@ -238,50 +238,63 @@ def _patch_httpx(monkeypatch, module, client_factory):
     monkeypatch.setattr(module, "httpx", fake)
 
 
-def test_anthropic_tool_loop_round_trip(monkeypatch):
+def _tool_call_reply(call_id: str, name: str, arguments: str, usage: dict | None = None) -> dict:
+    """A chat completion whose assistant turn asks for one tool."""
+    return {
+        "choices": [{
+            "finish_reason": "tool_calls",
+            "message": {"role": "assistant", "content": None, "tool_calls": [
+                {"id": call_id, "type": "function", "function": {"name": name, "arguments": arguments}},
+            ]},
+        }],
+        "usage": usage or {},
+    }
+
+
+def _text_reply(text: str, usage: dict | None = None) -> dict:
+    return {"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": text}}], "usage": usage or {}}
+
+
+def test_tool_loop_round_trip(monkeypatch):
     specs = build_tool_specs([_http_tool_row()])
     llm_calls: list[dict] = []
     tool_call: dict = {}
     _patch_httpx(monkeypatch, ai_module, _ScriptedLLM([
-        {
-            "stop_reason": "tool_use",
-            "content": [{"type": "tool_use", "id": "toolu_1", "name": "check_order", "input": {"order_id": "42"}}],
-            "usage": {"input_tokens": 10, "output_tokens": 5},
-        },
-        {
-            "stop_reason": "end_turn",
-            "content": [{"type": "text", "text": "Your order shipped."}],
-            "usage": {"input_tokens": 20, "output_tokens": 7},
-        },
+        _tool_call_reply("call_1", "check_order", '{"order_id": "42"}', {"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.001}),
+        _text_reply("Your order shipped.", {"prompt_tokens": 20, "completion_tokens": 7, "cost": 0.002}),
     ], llm_calls))
     _patch_httpx(monkeypatch, http_exec_module, _FakeToolEndpoint(tool_call))
     _allow_all_urls(monkeypatch)
 
-    completion = asyncio.run(anthropic_tool_loop(
-        "https://api.anthropic.test/v1", "key", "claude-opus-4-8",
+    completion = asyncio.run(tool_loop(
+        "https://openrouter.test/api/v1", "key", "openai/gpt-5.6-luna",
         [{"role": "system", "content": "Be helpful"}, {"role": "user", "content": "Where is order 42?"}],
         specs, None, None,
     ))
 
     first = llm_calls[0]["payload"]
-    assert first["tools"][0]["name"] == "check_order"
-    assert "When to use:" in first["tools"][0]["description"]
-    assert first["tools"][0]["input_schema"]["required"] == ["order_id"]
+    assert llm_calls[0]["url"].endswith("/chat/completions")
+    assert first["messages"][0] == {"role": "system", "content": "Be helpful"}
+    tool = first["tools"][0]
+    assert tool["type"] == "function"
+    assert tool["function"]["name"] == "check_order"
+    assert "When to use:" in tool["function"]["description"]
+    assert tool["function"]["parameters"]["required"] == ["order_id"]
 
     # The tool endpoint got the substituted path and decrypted auth header.
     assert tool_call["url"] == "https://api.example.test/orders/42"
     assert tool_call["method"] == "GET"
     assert tool_call["headers"]["Authorization"] == "Bearer sk-hidden"
 
-    second = llm_calls[1]["payload"]
-    assert second["messages"][-2]["role"] == "assistant"
-    result_block = second["messages"][-1]["content"][0]
-    assert result_block["type"] == "tool_result"
-    assert result_block["tool_use_id"] == "toolu_1"
-    assert "shipped" in result_block["content"]
+    # The assistant turn that asked for the tool is echoed back, then the tool message.
+    second = llm_calls[1]["payload"]["messages"]
+    assert second[-2]["role"] == "assistant"
+    assert second[-2]["tool_calls"][0]["id"] == "call_1"
+    assert second[-1] == {"role": "tool", "tool_call_id": "call_1", "content": 'HTTP 200: {"status": "shipped"}'}
 
     assert completion.text == "Your order shipped."
     assert completion.input_tokens == 30 and completion.output_tokens == 12
+    assert completion.cost_usd == 0.003
     assert completion.tool_calls == [{
         "name": "check_order",
         "arguments": {"order_id": "42"},
@@ -290,57 +303,22 @@ def test_anthropic_tool_loop_round_trip(monkeypatch):
     }]
 
 
-def test_openai_tool_loop_round_trip(monkeypatch):
-    specs = build_tool_specs([_http_tool_row()])
-    llm_calls: list[dict] = []
-    tool_call: dict = {}
-    function_call = {"type": "function_call", "call_id": "call_1", "name": "check_order", "arguments": '{"order_id": "42"}'}
-    _patch_httpx(monkeypatch, ai_module, _ScriptedLLM([
-        {"output": [function_call], "usage": {"input_tokens": 9, "output_tokens": 4}},
-        {"output": [{"type": "message", "content": [{"type": "output_text", "text": "Shipped!"}]}], "usage": {}},
-    ], llm_calls))
-    _patch_httpx(monkeypatch, http_exec_module, _FakeToolEndpoint(tool_call))
-    _allow_all_urls(monkeypatch)
-
-    completion = asyncio.run(openai_tool_loop(
-        "https://api.openai.test/v1", "secret", "gpt-5",
-        [{"role": "system", "content": "Be helpful"}, {"role": "user", "content": "Where is order 42?"}],
-        specs, None, None,
-    ))
-
-    # Responses API flat tool shape (no nested "function" key).
-    first_tool = llm_calls[0]["payload"]["tools"][0]
-    assert first_tool == {
-        "type": "function", "name": "check_order",
-        "description": first_tool["description"], "parameters": first_tool["parameters"],
-    }
-    second_input = llm_calls[1]["payload"]["input"]
-    assert function_call in second_input
-    assert second_input[-1] == {"type": "function_call_output", "call_id": "call_1", "output": 'HTTP 200: {"status": "shipped"}'}
-    assert completion.text == "Shipped!"
-    assert completion.tool_calls and completion.tool_calls[0]["name"] == "check_order"
-
-
 def test_loop_caps_iterations(monkeypatch):
     specs = build_tool_specs([_http_tool_row()])
-    tool_use = {
-        "stop_reason": "tool_use",
-        "content": [{"type": "tool_use", "id": "t", "name": "check_order", "input": {"order_id": "1"}}],
-        "usage": {},
-    }
-    final = {"stop_reason": "end_turn", "content": [{"type": "text", "text": "Done."}], "usage": {}}
+    tool_use = _tool_call_reply("t", "check_order", '{"order_id": "1"}')
+    final = _text_reply("Done.")
     llm_calls: list[dict] = []
     _patch_httpx(monkeypatch, ai_module, _ScriptedLLM([tool_use] * MAX_TOOL_ITERATIONS + [final], llm_calls))
     _patch_httpx(monkeypatch, http_exec_module, _FakeToolEndpoint({}))
     _allow_all_urls(monkeypatch)
 
-    completion = asyncio.run(anthropic_tool_loop(
-        "https://api.anthropic.test/v1", "key", "claude-opus-4-8",
+    completion = asyncio.run(tool_loop(
+        "https://openrouter.test/api/v1", "key", "anthropic/claude-sonnet-5",
         [{"role": "user", "content": "hi"}], specs, None, None,
     ))
     assert completion.text == "Done."
     assert len(llm_calls) == MAX_TOOL_ITERATIONS + 1
-    assert llm_calls[-1]["payload"]["tool_choice"] == {"type": "none"}
+    assert llm_calls[-1]["payload"]["tool_choice"] == "none"
     assert all("tool_choice" not in call["payload"] for call in llm_calls[:-1])
 
 
@@ -401,8 +379,8 @@ def test_ssrf_guard(monkeypatch):
 
 
 def test_conversation_uses_tools_end_to_end(authenticated_client: TestClient, monkeypatch):
-    """Full flow: agent with an HTTP tool answers through the OpenAI tool loop
-    and the assistant message persists the tool metadata."""
+    """Full flow: agent with an HTTP tool answers through the tool loop and
+    the assistant message persists the tool metadata."""
     client = authenticated_client
     agent_id = _setup_agent(client)
     created = client.post(f"/api/agents/{agent_id}/tools", json=HTTP_TOOL)
@@ -410,8 +388,8 @@ def test_conversation_uses_tools_end_to_end(authenticated_client: TestClient, mo
 
     llm_calls: list[dict] = []
     _patch_httpx(monkeypatch, ai_module, _ScriptedLLM([
-        {"output": [{"type": "function_call", "call_id": "c1", "name": "check_order", "arguments": '{"order_id": "42"}'}], "usage": {"input_tokens": 3, "output_tokens": 2}},
-        {"output": [{"type": "message", "content": [{"type": "output_text", "text": "It shipped."}]}], "usage": {"input_tokens": 4, "output_tokens": 3}},
+        _tool_call_reply("c1", "check_order", '{"order_id": "42"}', {"prompt_tokens": 3, "completion_tokens": 2}),
+        _text_reply("It shipped.", {"prompt_tokens": 4, "completion_tokens": 3}),
     ], llm_calls))
     _patch_httpx(monkeypatch, http_exec_module, _FakeToolEndpoint({}))
     _allow_all_urls(monkeypatch)
@@ -425,7 +403,7 @@ def test_conversation_uses_tools_end_to_end(authenticated_client: TestClient, mo
     assert assistant["tool_calls"][0]["is_error"] is False
     assert len(llm_calls) == 2
     # With tools active, the system prompt carries the no-fallback rule.
-    assert "do not answer from memory" in llm_calls[0]["payload"]["instructions"]
+    assert "do not answer from memory" in llm_calls[0]["payload"]["messages"][0]["content"]
 
 
 def test_failed_tool_result_is_marked(monkeypatch):
@@ -433,22 +411,18 @@ def test_failed_tool_result_is_marked(monkeypatch):
     specs = build_tool_specs([_http_tool_row()])
     llm_calls: list[dict] = []
     _patch_httpx(monkeypatch, ai_module, _ScriptedLLM([
-        {
-            "stop_reason": "tool_use",
-            "content": [{"type": "tool_use", "id": "toolu_1", "name": "check_order", "input": {"order_id": "42"}}],
-            "usage": {},
-        },
-        {"stop_reason": "end_turn", "content": [{"type": "text", "text": "That is unavailable right now."}], "usage": {}},
+        _tool_call_reply("call_1", "check_order", '{"order_id": "42"}'),
+        _text_reply("That is unavailable right now."),
     ], llm_calls))
     _patch_httpx(monkeypatch, http_exec_module, _FakeToolEndpoint({}, status_code=301, body=""))
     _allow_all_urls(monkeypatch)
 
-    completion = asyncio.run(anthropic_tool_loop(
-        "https://api.anthropic.test/v1", "key", "claude-opus-4-8",
+    completion = asyncio.run(tool_loop(
+        "https://openrouter.test/api/v1", "key", "anthropic/claude-sonnet-5",
         [{"role": "user", "content": "Where is order 42?"}], specs, None, None,
     ))
-    result_block = llm_calls[1]["payload"]["messages"][-1]["content"][0]
-    assert result_block["is_error"] is True
-    assert result_block["content"].startswith("Tool call failed: HTTP 301")
+    result_message = llm_calls[1]["payload"]["messages"][-1]
+    assert result_message["role"] == "tool"
+    assert result_message["content"].startswith("Tool call failed: HTTP 301")
     assert completion.tool_calls[0]["is_error"] is True
     assert completion.tool_calls[0]["result_preview"].startswith("Tool call failed:")

@@ -46,8 +46,8 @@ def resources(client, *, provider="instagram", account="111", human_agent=True):
     customer_response = client.post("/api/clients", json={"name": f"Shop {account}", "is_active": True})
     assert customer_response.status_code == 201, customer_response.text
     customer = customer_response.json()
-    assert client.put("/api/providers/openai", json={"api_key": "test-key"}).status_code == 200
-    agent_response = client.post("/api/agents", json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "name": "Support", "instructions": "", "personality": "", "is_active": True, "reply_delay_min_seconds": 0, "reply_delay_max_seconds": 0})
+    assert client.put("/api/providers/openrouter", json={"api_key": "test-key"}).status_code == 200
+    agent_response = client.post("/api/agents", json={"client_id": customer["id"], "provider": "openrouter", "model": "gpt-4.1-mini", "name": "Support", "instructions": "", "personality": "", "is_active": True, "reply_delay_min_seconds": 0, "reply_delay_max_seconds": 0})
     assert agent_response.status_code == 201, agent_response.text
     with TestingSession() as db:
         agent = db.get(Agent, agent_response.json()["id"])

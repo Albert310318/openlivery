@@ -13,7 +13,7 @@ See [Agents](agents.md) for where these live in the agent editor.
 
 ## How PDFs are processed
 
-When you upload a PDF, its text is extracted immediately with `pypdf` and stored on the document. If no text can be extracted (for example a scanned, image-only PDF), the document is marked as `error` and is not used. Extracted text is then split into paragraph-sized chunks. When an OpenAI-compatible connection with embedding support is available, each chunk is embedded and the vector is saved alongside it; embedding is best-effort, so if it is unavailable the agent still works using keyword search.
+When you upload a PDF, its text is extracted immediately with `pypdf` and stored on the document. If no text can be extracted (for example a scanned, image-only PDF), the document is marked as `error` and is not used. Extracted text is then split into paragraph-sized chunks. When the agency has an OpenRouter key, each chunk is embedded with `openai/text-embedding-3-small` and the vector is saved alongside it; embedding is best-effort, so if it is unavailable the agent still works using keyword search.
 
 ## How retrieval works
 
