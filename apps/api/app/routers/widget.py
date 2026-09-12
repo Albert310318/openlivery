@@ -23,7 +23,7 @@ from ..services.attachments import (
     store_attachment,
 )
 from ..services.tools import run_completion
-from ..services.knowledge import contact_context, build_system_prompt, retrieve_knowledge
+from ..services.knowledge import contact_context, build_system_prompt, llm_turns, retrieve_knowledge
 from ..services.providers import resolve_agent_credentials
 from ..services.usage import record_usage
 from ..services.notifications import notify_needs_human
@@ -283,7 +283,7 @@ async def _widget_ai_reply(db: Session, agent: Agent, conversation: Conversation
         system_content += "\n\n" + contact_block
     messages = [
         {"role": "system", "content": system_content},
-        *[{"role": item.role, "content": llm_text(item)} for item in history],
+        *llm_turns(history, agent.prompt_language),
     ]
     base_url, api_key = credentials
     try:

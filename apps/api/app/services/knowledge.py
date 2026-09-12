@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import industries
+from .attachments import llm_text
 from ..models import Agent, KnowledgeChunk, KnowledgeDocument
 from .embeddings import cosine_similarity, embed_query, embed_texts
 from .providers import resolve_provider_credentials
@@ -262,6 +263,56 @@ _PROMPT_TEXT = {
         "contact_rule": "Use these details when a task needs them (filling a record, sending an email, calling a tool). Do not ask the customer for what is already here and do not repeat it without reason. What is not listed you do not know: ask for it naturally if needed.",
     },
 }
+
+
+# What a turn written by a person from the business looks like to the model.
+#
+# Two variants on purpose. The short one only has to tell the voices apart. The
+# long one is used when that person's message is the last thing the business
+# said, because there the agent is not continuing its own turn -- it is walking
+# back into a conversation someone else was holding, and that is exactly when
+# it greets again as if nothing had happened.
+_HUMAN_TURN = {
+    "es": {
+        "short": "[Escrito por una persona del negocio]",
+        "last": (
+            "[Escrito por una persona del negocio. Es lo último que dijo el negocio, así que continúa "
+            "desde ahí: no saludes de nuevo, no te presentes y no preguntes en qué puedes ayudar. "
+            "Retoma lo que esa persona dejó pendiente y responde a eso.]"
+        ),
+    },
+    "en": {
+        "short": "[Written by a person from the business]",
+        "last": (
+            "[Written by a person from the business. It is the last thing the business said, so carry "
+            "on from there: do not greet again, do not introduce yourself and do not ask what you can "
+            "help with. Pick up whatever that person left open and answer that.]"
+        ),
+    },
+}
+
+
+def llm_turns(messages, lang: str | None = None) -> list[dict]:
+    """The stored conversation as turns the model can follow.
+
+    A reply written by a person is still the business speaking, so it stays an
+    assistant turn -- but it is labelled. Without the label the agent reads
+    words it never wrote as its own, and the thread starts sounding like three
+    people talking to one customer.
+    """
+    label = _HUMAN_TURN[lang if lang in _HUMAN_TURN else "es"]
+    items = list(messages)
+    # Where the business spoke last. If a person wrote that turn, the reminder
+    # travels with it: a rule in the system prompt sits thousands of characters
+    # away from the answer and loses to a plain "hi".
+    spoke_last = next((i for i in range(len(items) - 1, -1, -1) if items[i].role == "assistant"), None)
+    turns = []
+    for index, item in enumerate(items):
+        content = llm_text(item)
+        if item.role == "assistant" and item.sender_type == "human":
+            content = f"{label['last' if index == spoke_last else 'short']} {content}"
+        turns.append({"role": item.role, "content": content})
+    return turns
 
 
 def _section(title: str, body: str, level: int = 2) -> str:
