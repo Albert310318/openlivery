@@ -138,9 +138,16 @@ def read_usage(data: dict) -> Usage:
     cost = usage.get("cost")
     upstream = cost_details.get("upstream_inference_cost")
     cost_usd = None if cost is None and upstream is None else float(cost or 0) + float(upstream or 0)
+    if usage.get("is_byok") and upstream is None:
+        # Served through the account's own vendor key but the vendor's charge
+        # was not reported (speech-to-text does this): the cost is unknown,
+        # not zero, so Reports prices it from the catalog instead.
+        cost_usd = None
     return Usage(
-        input_tokens=int(usage.get("prompt_tokens") or 0),
-        output_tokens=int(usage.get("completion_tokens") or 0),
+        # Chat completions report prompt/completion tokens; the audio endpoint
+        # reports input/output tokens.
+        input_tokens=int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0),
+        output_tokens=int(usage.get("completion_tokens") or usage.get("output_tokens") or 0),
         cached_tokens=int(prompt_details.get("cached_tokens") or 0),
         reasoning_tokens=int(completion_details.get("reasoning_tokens") or 0),
         cost_usd=cost_usd,
@@ -176,6 +183,10 @@ def extract_chat_text(data: dict) -> str:
 
 def _is_sampling_param_error(response: httpx.Response) -> bool:
     message = _safe_provider_error(response).lower()
+    # "requires more credits, or fewer max_tokens" is a balance problem, not a
+    # parameter the model rejects; retrying without a cap only inflates it.
+    if "credits" in message:
+        return False
     return any(hint in message for hint in _SAMPLING_PARAM_HINTS)
 
 

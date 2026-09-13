@@ -3,7 +3,7 @@ import base64
 import httpx
 from fastapi import HTTPException
 
-from .ai import _safe_provider_error, auth_headers, chat_url, extract_chat_text
+from .ai import Completion, _safe_provider_error, auth_headers, chat_url, completion_from, extract_chat_text, read_usage
 
 
 # Transcription providers sniff the container from the file name, so a browser
@@ -41,8 +41,10 @@ async def transcribe_audio(
     audio: bytes,
     filename: str = "audio.ogg",
     content_type: str = "audio/ogg",
-) -> str:
-    """Transcribe an audio clip via an OpenAI-compatible /audio/transcriptions endpoint."""
+) -> Completion:
+    """Transcribe an audio clip via an OpenAI-compatible /audio/transcriptions
+    endpoint. The transcript is ``.text``; the rest is what the call used, so
+    the caller can record it like any other reply."""
     url = f"{base_url.rstrip('/')}/audio/transcriptions"
     files = {"file": (filename, audio, content_type), "model": (None, model)}
     headers = {key: value for key, value in auth_headers(api_key).items() if key != "Content-Type"}
@@ -54,9 +56,10 @@ async def transcribe_audio(
     if response.status_code >= 400:
         raise HTTPException(status_code=502, detail=f"Transcription failed: {_safe_provider_error(response)}")
     try:
-        return (response.json().get("text") or "").strip()
+        data = response.json()
     except ValueError as exc:
         raise HTTPException(status_code=502, detail="Invalid transcription response.") from exc
+    return completion_from((data.get("text") or "").strip(), read_usage(data), data)
 
 
 async def describe_image(
@@ -66,8 +69,9 @@ async def describe_image(
     image: bytes,
     content_type: str,
     instruction: str,
-) -> str:
-    """Describe an image with a vision model via chat completions."""
+) -> Completion:
+    """Describe an image with a vision model via chat completions. The
+    description is ``.text``; the rest is what the call used."""
     data_url = f"data:{content_type};base64,{base64.b64encode(image).decode()}"
     payload = {
         "model": model,
@@ -89,6 +93,7 @@ async def describe_image(
     if response.status_code >= 400:
         raise HTTPException(status_code=502, detail=f"Image analysis failed: {_safe_provider_error(response)}")
     try:
-        return extract_chat_text(response.json())
+        data = response.json()
+        return completion_from(extract_chat_text(data), read_usage(data), data)
     except (ValueError, KeyError, IndexError) as exc:
         raise HTTPException(status_code=502, detail="Invalid image analysis response.") from exc

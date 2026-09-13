@@ -35,6 +35,10 @@ Docker stack; run `alembic upgrade head` on local setups).
   the reply, the cached and reasoning token counts and how long the model
   took (migration `0043_usage_reply_link`). Replies recorded without a cost
   are valued at the catalog's list price and marked as estimated.
+  Voice-note transcriptions and image descriptions are recorded the same
+  way, linked to their conversation and agent; a transcription served
+  through the account's own vendor key, which OpenRouter does not price, is
+  valued at the catalog's speech-to-text list price.
 - **Portal reports redesigned.** The client portal's Reports tab now opens
   with metric cards (resolved by the AI, handed to a person, open now,
   messages received) and one activity chart that switches between

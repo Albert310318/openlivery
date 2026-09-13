@@ -362,6 +362,7 @@ async def widget_media(
             media_bytes=data,
             media_mime=content_type,
         ),
+        conversation=conversation,
     )
     if conversation.title == "Web chat" and caption:
         conversation.title = caption[:80]

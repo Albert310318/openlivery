@@ -15,6 +15,7 @@ from .attachments import MAX_ATTACHMENT_BYTES, attachment_kind, store_attachment
 from .media import audio_filename, describe_image, transcribe_audio
 from .model_catalog import DEFAULT_AUDIO_MODEL
 from .providers import DEFAULT_PROVIDER, resolve_provider_credentials
+from .usage import record_usage
 from .whatsapp import send_channel_media
 
 
@@ -31,11 +32,13 @@ def _operator_media_marker(kind: str) -> str:
 
 
 async def _operator_media_llm_text(
-    db: Session, agent: Agent, *, kind: str, data: bytes, mime: str, caption: str, filename: str | None
+    db: Session, conversation: Conversation, *, kind: str, data: bytes, mime: str, caption: str, filename: str | None
 ) -> str:
     """Marker plus a best-effort transcript/description, so the agent knows
-    what the operator actually sent when the conversation returns to AI mode."""
+    what the operator actually sent when the conversation returns to AI mode.
+    The call is usage like any reply, recorded against the conversation."""
     detail = ""
+    agent: Agent = conversation.agent
     enabled = (kind == "image" and agent.image_enabled) or (kind == "audio" and agent.audio_enabled)
     credentials = resolve_provider_credentials(db, agent.agency_id, DEFAULT_PROVIDER) if enabled else None
     if credentials:
@@ -47,10 +50,12 @@ async def _operator_media_llm_text(
                     "Describe brevemente el contenido de esta imagen que un operador humano envió al cliente,"
                     " para que el asistente tenga contexto de la conversación."
                 )
-                detail = await describe_image(base_url, api_key, model, data, mime, instruction)
+                result = await describe_image(base_url, api_key, model, data, mime, instruction)
             else:
                 model = agent.audio_model.strip() or DEFAULT_AUDIO_MODEL
-                detail = await transcribe_audio(base_url, api_key, model, data, filename or audio_filename(mime), mime) or ""
+                result = await transcribe_audio(base_url, api_key, model, data, filename or audio_filename(mime), mime)
+            record_usage(db, agent.agency_id, agent.id, DEFAULT_PROVIDER, model, result, conversation=conversation)
+            detail = result.text or ""
         except (HTTPException, ValueError):
             detail = ""
     if kind == "file" and filename:
@@ -95,7 +100,7 @@ async def store_operator_media_reply(
             db, conversation, kind=kind, data=data, mime=content_type, filename=file.filename, caption=caption
         )
     llm_content = await _operator_media_llm_text(
-        db, conversation.agent, kind=kind, data=data, mime=content_type, caption=caption, filename=filename
+        db, conversation, kind=kind, data=data, mime=content_type, caption=caption, filename=filename
     )
     message = Message(
         conversation_id=conversation.id,
