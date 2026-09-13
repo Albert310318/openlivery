@@ -89,7 +89,7 @@ def test_replies_are_linked_priced_and_rolled_up(authenticated_client: TestClien
     assert csv_resp.status_code == 200 and csv_resp.headers["content-type"].startswith("text/csv")
     lines = csv_resp.text.strip().splitlines()
     assert lines[0].startswith("date,reply_id,conversation,contact,client,agent,channel,model,served_by")
-    assert len(lines) == 3 and lines[1].endswith(",0.200000,yes,") and lines[2].endswith(",0.500000,,1200")
+    assert len(lines) == 3 and lines[1].endswith(",0.20000000,yes,") and lines[2].endswith(",0.50000000,,1200")
 
 
 def test_media_calls_are_recorded_against_the_conversation(authenticated_client: TestClient, monkeypatch):

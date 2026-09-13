@@ -24,7 +24,8 @@ function daysAgoISO(days: number): string {
 
 function money(value: number): string {
   if (value === 0) return "$0";
-  if (value < 0.01) return `$${value.toFixed(5)}`;
+  // Sub-cent amounts show every digit the router reported, e.g. $0.0000963.
+  if (value < 0.01) return `$${value.toFixed(8).replace(/0+$/, "")}`;
   if (value < 1) return `$${value.toFixed(4)}`;
   return `$${value.toFixed(2)}`;
 }

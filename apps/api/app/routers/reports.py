@@ -53,7 +53,7 @@ def _group_cost(metered, model: str, unpriced_in, unpriced_out) -> Decimal:
 
 
 def _money(value: Decimal) -> float:
-    return float(round(value, 6))
+    return float(round(value, 8))
 
 
 def _safe_tz(tz: str | None) -> str:
@@ -262,7 +262,7 @@ def replies(
             writer.writerow([
                 item["created_at"].isoformat(), item["id"], item["conversation_id"] or "", item["contact_name"] or "",
                 item["client_name"] or "", item["agent_name"] or "", item["channel"] or "", item["model"], item["served_by"],
-                item["input_tokens"], item["output_tokens"], f"{item['cost_usd']:.6f}", "yes" if item["estimated"] else "",
+                item["input_tokens"], item["output_tokens"], f"{item['cost_usd']:.8f}", "yes" if item["estimated"] else "",
                 item["duration_ms"] if item["duration_ms"] is not None else "",
             ])
         return Response(content=buffer.getvalue(), media_type="text/csv",
