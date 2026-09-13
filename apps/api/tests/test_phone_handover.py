@@ -36,6 +36,7 @@ def setup(authenticated_client, monkeypatch):
     send = AsyncMock(return_value="sent-1")
     monkeypatch.setattr(pipeline, "run_completion", completion)
     monkeypatch.setattr("app.services.whatsapp.send_channel_message", send)
+    monkeypatch.setattr("app.routers.conversations.send_channel_message", send)
     return client, channel_id, {"X-Bridge-Token": get_settings().whatsapp_bridge_token}, completion, send
 
 

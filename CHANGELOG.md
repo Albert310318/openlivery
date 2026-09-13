@@ -12,6 +12,13 @@ and are released together.
 Upgrading: this release adds database migrations (applied automatically by the
 Docker stack; run `alembic upgrade head` on local setups).
 
+### Added
+
+- Identify human-written turns in the agent's context while following the customer's current request.
+- Mirror linked-phone replies and pause WhatsApp agents for a configurable silence window, including Business app coexistence.
+- Preserve manual Inbox takeovers, contact routing and blocked contacts during phone handovers.
+- Document the host tools required for the Docker quickstart.
+
 ### Changed
 - **OpenRouter is the only AI provider.** An agency configures one OpenRouter
   key in Settings and every agent picks any model OpenRouter offers by its

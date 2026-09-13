@@ -60,16 +60,16 @@ def test_history_is_durable_bounded_and_never_replies(channel, monkeypatch):
         receive(db, channel, "history", payload)
         receive(db, channel, "history", payload)
         assert len(db.scalars(select(WhatsAppCoexistenceEvent)).all()) == 1
-        assert not db.scalars(select(Message)).all()
+        assert not db.scalars(select(Message).where(Message.kind == "message")).all()
         asyncio.run(coex.process_pending(db, limit=1, batch_size=1))
-        assert len(db.scalars(select(Message)).all()) == 1
+        assert len(db.scalars(select(Message).where(Message.kind == "message")).all()) == 1
         assert db.get(WhatsAppCloudChannel, channel).coexistence_sync["history"]["status"] == "pending"
         db.execute(update(WhatsAppCoexistenceEvent).values(available_at=now_utc()))
         db.commit()
     # A fresh process/session continues from the persisted offset.
     with TestingSession() as db:
         asyncio.run(coex.process_pending(db, limit=1, batch_size=1))
-        messages = db.scalars(select(Message).order_by(Message.created_at)).all()
+        messages = db.scalars(select(Message).where(Message.kind == "message").order_by(Message.created_at)).all()
         assert [m.role for m in messages] == ["user", "assistant"]
         assert all(m.is_historical for m in messages)
         conv = db.scalar(select(Conversation))
@@ -87,13 +87,13 @@ def test_phone_reply_pauses_agent_and_duplicate_does_not_take_over_twice(channel
         receive(db, channel, "smb_message_echoes", value(message_echoes=[echo]))
         conv = db.scalar(select(Conversation))
         assert conv.mode == "human" and conv.taken_over_at
-        assert db.scalar(select(Message)).sender_type == "human"
+        assert db.scalar(select(Message).where(Message.kind == "message")).sender_type == "human"
         conv.mode = "ai"
         db.commit()
         receive(db, channel, "smb_message_echoes", value(message_echoes=[echo]))
         db.refresh(conv)
         assert conv.mode == "ai"
-        assert len(db.scalars(select(Message)).all()) == 1
+        assert len(db.scalars(select(Message).where(Message.kind == "message")).all()) == 1
 
 
 def test_manual_routes_cannot_replace_or_locally_offboard_a_business_app_number(channel, authenticated_client):
@@ -142,7 +142,7 @@ def test_phone_reply_received_during_generation_suppresses_ai(channel, authentic
     send.assert_not_called()
     with TestingSession() as db:
         assert db.scalar(select(Conversation)).mode == "human"
-        assert not db.scalars(select(Message).where(Message.sender_type == "ai")).all()
+        assert not db.scalars(select(Message).where(Message.kind == "message").where(Message.sender_type == "ai")).all()
 
 
 def test_history_does_not_duplicate_live_message_or_overwrite_its_role(channel):
@@ -152,9 +152,9 @@ def test_history_does_not_duplicate_live_message_or_overwrite_its_role(channel):
         receive(db, channel, "smb_message_echoes", value(message_echoes=[echo]))
         receive(db, channel, "history", history(echo))
         asyncio.run(coex.process_pending(db))
-        message = db.scalar(select(Message))
+        message = db.scalar(select(Message).where(Message.kind == "message"))
         assert not message.is_historical and message.role == "assistant"
-        assert len(db.scalars(select(Message)).all()) == 1
+        assert len(db.scalars(select(Message).where(Message.kind == "message")).all()) == 1
 
 
 def test_other_number_and_forged_signature_are_rejected(channel, authenticated_client):
@@ -213,7 +213,7 @@ def test_media_history_can_arrive_before_the_message(channel, monkeypatch):
         db.execute(update(WhatsAppCoexistenceEvent).values(available_at=now_utc()))
         db.commit()
         asyncio.run(coex.process_pending(db))
-        message = db.scalar(select(Message))
+        message = db.scalar(select(Message).where(Message.kind == "message"))
         assert message.content == "A photo" and len(message.attachments) == 1
         assert message.is_historical
 
@@ -266,7 +266,7 @@ def test_refresh_reconciles_revoked_access_and_preserves_history(channel, authen
     graph.assert_awaited_once()
     assert graph.call_args.args[0] == "GET"
     with TestingSession() as db:
-        assert db.scalar(select(Message)).content == "existing-reply"
+        assert db.scalar(select(Message).where(Message.kind == "message")).content == "existing-reply"
         assert db.scalar(select(Conversation)).mode == "human"
     assert authenticated_client.post(refresh_url(channel)).status_code == 200
     graph.assert_awaited_once()
@@ -353,7 +353,7 @@ def test_import_query_count_does_not_grow_per_message(channel):
         finally:
             event.remove(engine, "before_cursor_execute", count)
         assert len(calls) < 25, len(calls)
-        assert len(db.scalars(select(Message)).all()) == 100
+        assert len(db.scalars(select(Message).where(Message.kind == "message")).all()) == 100
 
 
 def test_contacts_name_history_placeholders_and_ignore_out_of_order_changes(channel):
@@ -374,7 +374,7 @@ def test_contacts_name_history_placeholders_and_ignore_out_of_order_changes(chan
         asyncio.run(coex.process_pending(db))
         db.refresh(person)
         assert person.name == ""
-        assert len(db.scalars(select(Message)).all()) == 1
+        assert len(db.scalars(select(Message).where(Message.kind == "message")).all()) == 1
         person.name = "My customer label"
         db.commit()
         receive(db, channel, "smb_app_state_sync", value(state_sync=[contact("add", 0, "Phone label")]))
@@ -405,3 +405,27 @@ def test_restart_does_not_repeat_an_inflight_sync(channel, monkeypatch):
         asyncio.run(coex.run_scope(db))
         assert row.coexistence_sync["history"]["status"] == "unknown"
     send.assert_not_called()
+
+
+def test_phone_pause_expires_and_answers_pending_customer_in_coexistence(channel, authenticated_client, monkeypatch):
+    from app.services.phone_handover import resume_due
+    completion = AsyncMock(return_value=Completion(text="The beard trim is $10."))
+    send = AsyncMock(return_value="resumed-reply")
+    monkeypatch.setattr(whatsapp_inbound, "run_completion", completion)
+    monkeypatch.setattr("app.services.whatsapp.send_channel_message", send)
+    with TestingSession() as db:
+        receive(db, channel, "smb_message_echoes", value(message_echoes=[{**raw("phone", outgoing=True), "to": PERSON}]))
+        conversation_id = db.scalar(select(Conversation.id))
+    response = _post_signed(authenticated_client, str(channel), _webhook_payload([
+        {**raw("question", age=0), "text": {"body": "How much is the beard trim?"}}]))
+    assert response.status_code == 200
+    completion.assert_not_awaited()
+    with TestingSession() as db:
+        row = db.get(Conversation, conversation_id)
+        assert row.mode == "human" and row.phone_pause_until is not None
+        row.phone_pause_until = now_utc() - timedelta(seconds=1)
+        db.commit()
+    with TestingSession() as db:
+        asyncio.run(resume_due(db))
+    completion.assert_awaited_once()
+    send.assert_awaited_once()

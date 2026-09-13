@@ -93,3 +93,21 @@ A contact that spams the number can be **blocked** from Contacts or from the con
 **Unblocking** does not answer the backlog. The open conversation is resolved with a note in the thread, and the contact's next message opens a fresh conversation that the agent handles as usual.
 
 API: `POST /api/portal/{slug}/contacts/{id}/block` with `{"blocked": true|false}`; `ContactOut.blocked_at` says whether a contact is blocked. This is an internal block: WhatsApp itself is not told, so the contact sees their messages as delivered.
+
+
+### Replying from a phone
+
+Replies sent from the linked WhatsApp phone or from WhatsApp Business in
+coexistence are included in the conversation as human messages. Each reply
+starts or extends a temporary AI pause, ten minutes by default. Set **Pause
+after a phone reply (minutes)** in the agent settings to change this interval.
+Customer messages are saved during the pause; they do not end it. When the
+pause expires, the AI answers only if a customer message is still pending.
+The deadline survives a server restart.
+
+The Inbox shows the pause deadline. **Keep under human control**, assigning
+an operator, or replying from the Inbox makes the takeover manual. A manual
+hold never expires automatically: choose **Return to AI** when finished.
+Human messages are identified as such in the model's context, so the agent can
+continue the exchange when it resumes. Phone media on the QR channel currently
+appears as a media label when it has no caption; its contents are not transcribed.
