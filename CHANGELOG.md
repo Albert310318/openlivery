@@ -43,9 +43,11 @@ Docker stack; run `alembic upgrade head` on local setups).
   took (migration `0043_usage_reply_link`). Replies recorded without a cost
   are valued at the catalog's list price and marked as estimated.
   Voice-note transcriptions and image descriptions are recorded the same
-  way, linked to their conversation and agent; a transcription served
-  through the account's own vendor key, which OpenRouter does not price, is
-  valued at the catalog's speech-to-text list price.
+  way, linked to their conversation, agent and the message that carried the
+  media. The audio endpoint does not report what the vendor charged, so the
+  transcription's cost and vendor are read from OpenRouter's generation
+  record right after; if that record is not available, the row is valued at
+  the catalog's speech-to-text list price and marked estimated.
 - **Portal reports redesigned.** The client portal's Reports tab now opens
   with metric cards (resolved by the AI, handed to a person, open now,
   messages received) and one activity chart that switches between

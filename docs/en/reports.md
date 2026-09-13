@@ -6,7 +6,7 @@
 
 ## What a reply records
 
-Every AI reply leaves a row in `usage_records` with the tokens it used, what it cost as OpenRouter reported it (`cost_usd`), the vendor that served it (`served_by`, for example Azure or Google AI Studio), cached and reasoning token counts, how long the model took (`duration_ms`), and the conversation and message it belongs to. Voice-note transcriptions and image descriptions leave a row too, linked to the conversation and agent; a transcription served through your own vendor key comes back from OpenRouter without a price, so it is valued at the catalog's speech-to-text list price and marked estimated.
+Every AI reply leaves a row in `usage_records` with the tokens it used, what it cost as OpenRouter reported it (`cost_usd`), the vendor that served it (`served_by`, for example Azure or Google AI Studio), cached and reasoning token counts, how long the model took (`duration_ms`), and the conversation and message it belongs to. Voice-note transcriptions and image descriptions leave a row too, linked to the conversation, the agent and the message that carried the media. The audio endpoint answers without the vendor's charge, so the transcription's cost and vendor are read from OpenRouter's generation record a moment later; only if that record is unavailable is the row valued at the catalog's speech-to-text list price and marked estimated.
 
 Rows from before version 0.4 carry tokens only. Reports values those at the catalog's list price for the model (`apps/api/app/services/model_catalog.py`) and marks them **estimated**, on the row and in the tile that counts them.
 

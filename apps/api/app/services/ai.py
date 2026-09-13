@@ -138,10 +138,11 @@ def read_usage(data: dict) -> Usage:
     cost = usage.get("cost")
     upstream = cost_details.get("upstream_inference_cost")
     cost_usd = None if cost is None and upstream is None else float(cost or 0) + float(upstream or 0)
-    if usage.get("is_byok") and upstream is None:
-        # Served through the account's own vendor key but the vendor's charge
-        # was not reported (speech-to-text does this): the cost is unknown,
-        # not zero, so Reports prices it from the catalog instead.
+    if not cost and upstream is None:
+        # Nothing charged by the router and no vendor charge reported: served
+        # through the account's own vendor key (speech-to-text reports it this
+        # way, without even the BYOK flag). The cost is unknown, not zero, so
+        # Reports prices it from the catalog instead.
         cost_usd = None
     return Usage(
         # Chat completions report prompt/completion tokens; the audio endpoint

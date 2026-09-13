@@ -32,11 +32,12 @@ def _operator_media_marker(kind: str) -> str:
 
 
 async def _operator_media_llm_text(
-    db: Session, conversation: Conversation, *, kind: str, data: bytes, mime: str, caption: str, filename: str | None
+    db: Session, conversation: Conversation, message: Message, *, kind: str, data: bytes, mime: str, caption: str, filename: str | None
 ) -> str:
     """Marker plus a best-effort transcript/description, so the agent knows
     what the operator actually sent when the conversation returns to AI mode.
-    The call is usage like any reply, recorded against the conversation."""
+    The call is usage like any reply, recorded against the conversation and
+    the operator's (pending) message."""
     detail = ""
     agent: Agent = conversation.agent
     enabled = (kind == "image" and agent.image_enabled) or (kind == "audio" and agent.audio_enabled)
@@ -54,7 +55,7 @@ async def _operator_media_llm_text(
             else:
                 model = agent.audio_model.strip() or DEFAULT_AUDIO_MODEL
                 result = await transcribe_audio(base_url, api_key, model, data, filename or audio_filename(mime), mime)
-            record_usage(db, agent.agency_id, agent.id, DEFAULT_PROVIDER, model, result, conversation=conversation)
+            record_usage(db, agent.agency_id, agent.id, DEFAULT_PROVIDER, model, result, conversation=conversation, message=message)
             detail = result.text or ""
         except (HTTPException, ValueError):
             detail = ""
@@ -102,18 +103,17 @@ async def store_operator_media_reply(
         external_message_id = await send_channel_media(
             db, conversation, kind=kind, data=data, mime=content_type, filename=file.filename, caption=caption
         )
-    llm_content = await _operator_media_llm_text(
-        db, conversation, kind=kind, data=data, mime=content_type, caption=caption, filename=filename
-    )
     message = Message(
         conversation_id=conversation.id,
         role="assistant",
         content=caption,
-        llm_content=llm_content,
         sender_type="human",
         sender_name=sender_name,
         portal_user_id=portal_user_id,
         external_message_id=external_message_id,
+    )
+    message.llm_content = await _operator_media_llm_text(
+        db, conversation, message, kind=kind, data=data, mime=content_type, caption=caption, filename=filename
     )
     db.add(message)
     db.flush()

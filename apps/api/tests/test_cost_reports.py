@@ -100,9 +100,11 @@ def test_media_calls_are_recorded_against_the_conversation(authenticated_client:
     customer, agent, conversation = _setup(client)
     client.patch(f"/api/agents/{agent['id']}", json={"audio_enabled": True, "image_enabled": True, "image_model": "openai/gpt-4.1"})
     # OpenRouter's audio endpoint: input/output token names, BYOK with no upstream cost.
+    # The audio endpoint reports a zero router charge and nothing else about
+    # cost, not even the BYOK flag; that is "unknown", never "free".
     transcription = ai_service.completion_from(
         "quiero reservar",
-        ai_service.read_usage({"usage": {"input_tokens": 1_000_000, "output_tokens": 0, "cost": 0, "is_byok": True}}),
+        ai_service.read_usage({"usage": {"input_tokens": 1_000_000, "output_tokens": 0, "cost": 0}}),
         {"provider": "OpenAI"},
     )
     assert transcription.cost_usd is None and transcription.input_tokens == 1_000_000 and transcription.served_by == "OpenAI"
@@ -126,6 +128,10 @@ def test_media_calls_are_recorded_against_the_conversation(authenticated_client:
     assert image["cost_usd"] == 0.001 and image["estimated"] is False and image["served_by"] == "Azure"
     assert image["conversation_id"] == conversation["id"]
     assert len(rows) == 2  # the stubbed chat replies used no tokens, so nothing else is recorded
+    # Each call is linked to the visitor message that carried the media.
+    with TestingSession() as db:
+        linked = {str(r.message_id): db.get(Message, r.message_id) for r in db.query(UsageRecord).all()}
+    assert len(linked) == 2 and all(m is not None and m.role == "user" for m in linked.values())
 
 
 def test_reports_need_a_session_and_start_empty(client: TestClient):

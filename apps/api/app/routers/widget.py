@@ -351,6 +351,7 @@ async def widget_media(
         raise HTTPException(status_code=400, detail="The file is empty")
     caption = caption.strip()[:8000]
 
+    message = Message(conversation_id=conversation.id, role="user", content="", sender_type="visitor", sender_name="Visitor")
     display_content, llm_content = await resolve_inbound_content(
         db,
         agent,
@@ -363,18 +364,13 @@ async def widget_media(
             media_mime=content_type,
         ),
         conversation=conversation,
+        message=message,
     )
     if conversation.title == "Web chat" and caption:
         conversation.title = caption[:80]
     conversation.updated_at = now_utc()
-    message = Message(
-        conversation_id=conversation.id,
-        role="user",
-        content=display_content,
-        llm_content=llm_content if llm_content != display_content else None,
-        sender_type="visitor",
-        sender_name="Visitor",
-    )
+    message.content = display_content
+    message.llm_content = llm_content if llm_content != display_content else None
     db.add(message)
     db.flush()
     store_attachment(db, message, data=data, mime=content_type, filename=file.filename, kind=kind)

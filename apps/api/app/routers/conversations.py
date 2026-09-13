@@ -314,6 +314,7 @@ async def send_media_message(
     # Same orchestration as the WhatsApp channels: the chat keeps the original
     # file as an attachment, the LLM gets a description/transcript (or a
     # placeholder when the capability is off or no OpenAI key is configured).
+    message = Message(conversation_id=conversation.id, role="user", content="", sender_type="visitor", sender_name="You")
     display_content, llm_content = await resolve_inbound_content(
         db,
         agent,
@@ -326,19 +327,14 @@ async def send_media_message(
             media_mime=content_type,
         ),
         conversation=conversation,
+        message=message,
     )
 
     if not conversation.messages and caption:
         conversation.title = caption[:80]
     conversation.updated_at = now_utc()
-    message = Message(
-        conversation_id=conversation.id,
-        role="user",
-        content=display_content,
-        llm_content=llm_content if llm_content != display_content else None,
-        sender_type="visitor",
-        sender_name="You",
-    )
+    message.content = display_content
+    message.llm_content = llm_content if llm_content != display_content else None
     db.add(message)
     db.flush()
     store_attachment(db, message, data=data, mime=content_type, filename=file.filename, kind=kind)

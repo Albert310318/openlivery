@@ -78,14 +78,20 @@ def _media_placeholder(kind: str) -> str:
 
 
 async def resolve_inbound_content(
-    db: Session, agent: Agent, inbound: InboundMessage, *, conversation: Conversation | None = None
+    db: Session,
+    agent: Agent,
+    inbound: InboundMessage,
+    *,
+    conversation: Conversation | None = None,
+    message: Message | None = None,
 ) -> tuple[str, str]:
     """Resolve what to store for the message as ``(display, llm)``: the visible
     chat text (the caption — the media file itself is kept as an attachment)
     and the text the LLM sees, transcribing/describing media when the agent's
     capabilities allow it. Best-effort: the LLM text falls back to a placeholder.
     A transcription or description is usage like any reply, recorded against
-    ``conversation`` when the caller has it."""
+    ``conversation`` and the (possibly pending) ``message`` that carried the
+    media when the caller has them."""
     text = (inbound.text or "").strip()
     if not inbound.media_kind:
         return text, text
@@ -107,12 +113,12 @@ async def resolve_inbound_content(
                 + (f" El cliente escribió: {text}" if text else "")
             )
             described = await describe_image(base_url, api_key, model, data, inbound.media_mime or "image/jpeg", instruction)
-            record_usage(db, agent.agency_id, agent.id, DEFAULT_PROVIDER, model, described, conversation=conversation)
+            record_usage(db, agent.agency_id, agent.id, DEFAULT_PROVIDER, model, described, conversation=conversation, message=message)
             return text, (f"{text}\n\n" if text else "") + f"[Imagen recibida] {described.text}"
         model = agent.audio_model.strip() or DEFAULT_AUDIO_MODEL
         mime = inbound.media_mime or "audio/ogg"
         transcribed = await transcribe_audio(base_url, api_key, model, data, audio_filename(mime), mime)
-        record_usage(db, agent.agency_id, agent.id, DEFAULT_PROVIDER, model, transcribed, conversation=conversation)
+        record_usage(db, agent.agency_id, agent.id, DEFAULT_PROVIDER, model, transcribed, conversation=conversation, message=message)
         return text, (f"{text}\n\n" if text else "") + (transcribed.text or _media_placeholder("audio"))
     except (HTTPException, ValueError):
         return text, text or _media_placeholder(inbound.media_kind)
@@ -210,17 +216,22 @@ async def process_inbound(
         if contact:
             conversation.contact_id = contact.id
 
-    display_content, llm_content = await resolve_inbound_content(db, channel.agent, inbound, conversation=conversation)
+    # The message exists before its media is resolved, so a transcription or
+    # description can be recorded against it.
     visitor_message = Message(
         conversation_id=conversation.id,
         role="user",
-        content=display_content,
-        llm_content=llm_content if llm_content != display_content else None,
+        content="",
         sender_type="visitor",
         sender_name=inbound.sender_name or ("Contact" if conversation_channel in ("instagram", "messenger") else "WhatsApp contact"),
         external_message_id=inbound.external_message_id,
         **({"created_at": inbound.occurred_at} if inbound.occurred_at else {}),
     )
+    display_content, llm_content = await resolve_inbound_content(
+        db, channel.agent, inbound, conversation=conversation, message=visitor_message
+    )
+    visitor_message.content = display_content
+    visitor_message.llm_content = llm_content if llm_content != display_content else None
     if inbound.quoted_external_id:
         quoted = db.scalar(
             select(Message).where(
