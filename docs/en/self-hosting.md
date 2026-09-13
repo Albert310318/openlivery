@@ -151,6 +151,8 @@ Do this before exposing OpenLivery to anyone else.
 
 ## Go to production (HTTPS)
 
+For Easypanel, follow the [dedicated guide and Compose template](deploy-easypanel.md).
+
 The stack serves plain HTTP on the gateway. For a public deployment, put **your
 own reverse proxy** (Caddy, nginx, Traefik, a cloud load balancer…) in front of
 the gateway to terminate TLS with your domain — the usual self-hosting model.
@@ -266,8 +268,8 @@ All state lives in named Docker volumes, so `make down` and upgrades keep it:
 
 | Volume | Contents |
 | --- | --- |
-| `postgres_data` | The PostgreSQL database — agencies, agents, conversations, encrypted provider keys, encrypted WhatsApp session markers and the whatsmeow session store (its own `whatsmeow` schema). |
-| `backend_storage` | Uploaded files (e.g. knowledge-base PDFs). |
+| `postgres_data` | PostgreSQL: agency data, knowledge PDF bytes, message attachment bytes, logos, encrypted provider keys, WhatsApp session markers, and the whatsmeow session store (its own `whatsmeow` schema). |
+| `backend_storage` | The API mount at `/app/backend/storage`. Built-in uploads currently use PostgreSQL, so this volume may be empty. Preserve any files an extension or custom deployment places here. |
 
 The `ENCRYPTION_KEY` decrypts the provider API keys and WhatsApp session markers.
 **Never change it** once secrets are stored, or they become unrecoverable —
@@ -275,25 +277,107 @@ treat it as part of your backup.
 
 ## Backups
 
-Export PostgreSQL without stopping the app:
+A complete backup contains **the PostgreSQL dump, the original `ENCRYPTION_KEY`,
+and any persistent files outside PostgreSQL**. Keep `.env.docker` in a secret
+manager so the other installation settings can be recovered too.
+
+Built-in knowledge PDFs (`knowledge_documents.file_data`), message attachments
+(`message_attachments.data`), and logos are binary database columns: the dump
+already includes their bytes. The `backend_storage` volume is still declared in
+Compose and may contain files from extensions or a customized installation.
+The procedure below archives it too; an empty archive is normal for an unmodified
+installation.
+
+The following commands run from the installation's repository directory. This
+helper selects its Compose configuration; the file commands use the **API
+service's configured storage mount**, not a guessed Docker volume name:
 
 ```bash
+dc() { docker compose --env-file .env.docker "$@"; }
+```
+
+For an Easypanel installation, use the [Easypanel-specific helper](deploy-easypanel.md#backups-and-restores)
+instead. These commands assume the bundled PostgreSQL also holds the whatsmeow
+session store. Back up a separately configured `WHATSAPP_STORE_URL` separately.
+
+### Export a consistent backup
+
+Schedule a maintenance window. Stop `api` and `whatsapp` **before both exports**:
+the API writes application data, and the bridge writes WhatsApp sessions.
+Also pause any extensions or external writers that modify the database or files.
+Keep them stopped until both exports finish so the database and files describe
+the same application state.
+
+```bash
+set -eu
+umask 077
+backup_dir="backups/$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p backups
-docker compose --env-file .env.docker exec -T db \
-  sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > backups/openlivery.dump
+mkdir "$backup_dir"
+dc stop api whatsapp
+dc exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \
+  > "$backup_dir/openlivery.dump.partial"
+dc run --rm --no-deps -T --entrypoint tar api \
+  -czf - -C /app/backend/storage . > "$backup_dir/uploads.tar.gz.partial"
+mv "$backup_dir/openlivery.dump.partial" "$backup_dir/openlivery.dump"
+mv "$backup_dir/uploads.tar.gz.partial" "$backup_dir/uploads.tar.gz"
+dc start api whatsapp
 ```
 
-Also store `.env.docker` in a secret manager: a backup with API keys or a
-WhatsApp session needs the same `ENCRYPTION_KEY` to be decrypted.
+The temporary API container runs only `tar`; it does not start the application
+or migrations. If an export fails, do not use the partial backup. Check the error
+and explicitly restart the stopped services when it is safe to resume writes.
+Copy the completed backup off the server and record the image version or Git
+revision it came from, alongside the separately stored original secrets.
 
-Restore (replaces data in the target database — back up first):
+### Restore to an explicit target
+
+Run the restore from the **destination installation's** repository directory,
+using the matching image version and the original secrets. Point `backup_dir` at
+the matching dump and archive. These commands replace data in that destination
+PostgreSQL database. Back up an existing destination before continuing.
+
+The upload destination must be empty: the procedure refuses to overlay an archive
+onto existing files. Prefer a fresh installation; do not remove another
+installation's volume to make this check pass. Download the destination images
+before the maintenance window, then prepare its database and storage mount:
 
 ```bash
-docker compose --env-file .env.docker stop api whatsapp
-docker compose --env-file .env.docker exec -T db \
-  sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner' < backups/openlivery.dump
-docker compose --env-file .env.docker start api whatsapp
+set -eu
+backup_dir="backups/REPLACE_WITH_BACKUP_DIRECTORY"
+test -s "$backup_dir/openlivery.dump"
+test -s "$backup_dir/uploads.tar.gz"
+dc stop api whatsapp
+dc up -d --wait db
+dc create --no-build api
+api_container=$(dc ps -aq api)
+docker inspect "$api_container" --format '{{range .Mounts}}{{if eq .Destination "/app/backend/storage"}}Upload restore target: {{.Source}}{{end}}{{end}}'
 ```
+
+Confirm that the displayed storage target and the Compose project are the intended
+destination. With writers still stopped, validate the archive and empty target,
+then restore both parts. Stop on any error; do not start the API with only one
+part restored.
+
+```bash
+set -eu
+dc run --rm --no-deps -T --entrypoint tar api -tzf - \
+  < "$backup_dir/uploads.tar.gz" > /dev/null
+dc run --rm --no-deps -T --entrypoint sh api -c \
+  'contents=$(find /app/backend/storage -mindepth 1 -print -quit) || exit 1; test -z "$contents" || { echo "Upload target is not empty; restore to an empty destination." >&2; exit 1; }'
+dc exec -T db sh -c \
+  'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner --exit-on-error --single-transaction' \
+  < "$backup_dir/openlivery.dump"
+dc run --rm --no-deps -T --entrypoint tar api \
+  -xzf - -C /app/backend/storage < "$backup_dir/uploads.tar.gz"
+dc up -d --wait --no-build
+```
+
+Check sign-in, restored knowledge documents or attachments, and any restored
+volume files before accepting traffic. The
+`ENCRYPTION_KEY` must be the original value; replacing it does not repair encrypted
+credentials. Rehearse the procedure with harmless files in a disposable local
+installation before using it for an actual recovery.
 
 ## Upgrade
 

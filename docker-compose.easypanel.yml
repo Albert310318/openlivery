@@ -1,0 +1,107 @@
+# Git-backed Easypanel Compose service. Route the domain to proxy:80.
+# Published application images target linux/amd64; build your own for other CPUs.
+services:
+  db:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-openlivery}
+      POSTGRES_USER: ${POSTGRES_USER:-openlivery}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    image: ${OPENLIVERY_IMAGE_PREFIX:-ghcr.io/sarrazola/openlivery}-api:${OPENLIVERY_VERSION:-latest}
+    platform: linux/amd64
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-openlivery}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-openlivery}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set ENCRYPTION_KEY}
+      WHATSAPP_BRIDGE_TOKEN: ${WHATSAPP_BRIDGE_TOKEN:?Set WHATSAPP_BRIDGE_TOKEN}
+      WHATSAPP_BRIDGE_URL: http://whatsapp:3101
+      FRONTEND_URL: ${FRONTEND_URL:?Set FRONTEND_URL to the public HTTPS origin}
+      COOKIE_SECURE: "true"
+      COOKIE_SAMESITE: lax
+      ACCESS_TOKEN_MINUTES: ${ACCESS_TOKEN_MINUTES:-10080}
+      STORAGE_DIR: /app/backend/storage
+    volumes:
+      - backend_storage:/app/backend/storage
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
+    restart: unless-stopped
+
+  web:
+    image: ${OPENLIVERY_IMAGE_PREFIX:-ghcr.io/sarrazola/openlivery}-web:${OPENLIVERY_VERSION:-latest}
+    platform: linux/amd64
+    environment:
+      BACKEND_INTERNAL_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+  whatsapp:
+    image: ${OPENLIVERY_IMAGE_PREFIX:-ghcr.io/sarrazola/openlivery}-whatsapp:${OPENLIVERY_VERSION:-latest}
+    platform: linux/amd64
+    environment:
+      BACKEND_URL: http://api:8000
+      WHATSAPP_BRIDGE_HOST: 0.0.0.0
+      WHATSAPP_BRIDGE_PORT: 3101
+      WHATSAPP_BRIDGE_TOKEN: ${WHATSAPP_BRIDGE_TOKEN:?Set WHATSAPP_BRIDGE_TOKEN}
+      WHATSAPP_STORE_URL: postgres://${POSTGRES_USER:-openlivery}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-openlivery}?sslmode=disable&search_path=whatsmeow
+    depends_on:
+      api:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/bridge", "-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+  proxy:
+    image: caddy:2-alpine
+    configs:
+      - source: gateway
+        target: /etc/caddy/Caddyfile
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/login"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+configs:
+  gateway:
+    file: ./docker/Caddyfile
+
+volumes:
+  postgres_data:
+  backend_storage:
