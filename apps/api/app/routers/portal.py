@@ -1534,6 +1534,9 @@ async def portal_reply_template(
         raise HTTPException(status_code=409, detail="Take control of the conversation before replying")
     if conversation.channel != "whatsapp_cloud" or not conversation.external_chat_id:
         raise HTTPException(status_code=409, detail="Templates only exist on the WhatsApp API line")
+    if conversation.phone_pause_until is not None:
+        set_mode(db, conversation, "human")
+        db.commit()
     external_message_id, text = await _send_template_to(db, client, conversation.external_chat_id, payload)
     db.add(
         Message(

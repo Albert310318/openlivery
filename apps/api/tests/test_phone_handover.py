@@ -235,3 +235,32 @@ def test_pause_duration_is_saved_and_validated(setup):
     phone(setup, "new-pause")
     with TestingSession() as db:
         assert now_utc() + timedelta(minutes=2) < db.get(Conversation, cid).phone_pause_until < now_utc() + timedelta(minutes=4)
+
+
+def test_template_reply_holds_control_before_network_send_even_if_send_fails(setup, monkeypatch):
+    from fastapi import HTTPException
+    from app.routers import portal
+    from app.schemas import TemplateSend
+
+    cid = phone(setup)
+    expire(cid)
+
+    async def failing_send(*args):
+        with TestingSession() as independent:
+            saved = independent.get(Conversation, cid)
+            assert saved.mode == "human" and saved.phone_pause_until is None
+        raise HTTPException(status_code=502, detail="Delivery unavailable")
+
+    monkeypatch.setattr(portal, "_send_template_to", failing_send)
+    with TestingSession() as db:
+        conversation = db.get(Conversation, cid)
+        customer = conversation.whatsapp_channel.client
+        conversation.channel = "whatsapp_cloud"
+        db.commit()
+        with pytest.raises(HTTPException, match="Delivery unavailable"):
+            asyncio.run(portal.portal_reply_template(
+                slug=customer.portal_slug, conversation_id=cid,
+                payload=TemplateSend(name="hello", language="en", variables=[]),
+                client=customer, user=None, sender_name="Operator", db=db))
+    sweep()
+    setup[3].assert_not_awaited()
