@@ -36,6 +36,7 @@ export default function AgentDetailPage() {
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState(2048);
   const [memoryLimit, setMemoryLimit] = useState(30);
+  const [phoneHandoverMinutes, setPhoneHandoverMinutes] = useState(10);
   const [replyDelayMin, setReplyDelayMin] = useState(6);
   const [replyDelayMax, setReplyDelayMax] = useState(9);
   const [imageEnabled, setImageEnabled] = useState(false);
@@ -55,7 +56,7 @@ export default function AgentDetailPage() {
     // What the model receives on every message, measured on the real prompt.
     api<{ prompt: string }>(`/agents/${id}/prompt`).then((r) => setPromptTokens(estimateTokens(r.prompt))).catch(() => setPromptTokens(null));
     setProvider(a.provider); setModel(a.model);
-    setTemperature(a.temperature); setMaxTokens(a.max_tokens); setMemoryLimit(a.memory_limit); setReplyDelayMin(a.reply_delay_min_seconds); setReplyDelayMax(a.reply_delay_max_seconds);
+    setTemperature(a.temperature); setMaxTokens(a.max_tokens); setMemoryLimit(a.memory_limit); setPhoneHandoverMinutes(a.phone_handover_minutes); setReplyDelayMin(a.reply_delay_min_seconds); setReplyDelayMax(a.reply_delay_max_seconds);
     setImageEnabled(a.image_enabled); setImageModel(a.image_model || DEFAULT_IMAGE_MODEL);
     setAudioEnabled(a.audio_enabled); setAudioModel(a.audio_model || DEFAULT_AUDIO_MODEL);
   };
@@ -71,7 +72,7 @@ export default function AgentDetailPage() {
   async function saveConfig(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true);
     const form = new FormData(event.currentTarget);
-    const payload = { name, instructions: form.get("instructions"), personality: form.get("personality"), brief_summary: form.get("brief_summary"), brief_products: form.get("brief_products"), brief_audience: form.get("brief_audience"), brief_policies: form.get("brief_policies"), brief_dos: form.get("brief_dos"), brief_donts: form.get("brief_donts"), provider, model, prompt_language: lang, temperature, max_tokens: maxTokens, memory_limit: memoryLimit, reply_delay_min_seconds: replyDelayMin, reply_delay_max_seconds: replyDelayMax, image_enabled: imageEnabled, image_model: imageModel, audio_enabled: audioEnabled, audio_model: audioModel };
+    const payload = { name, instructions: form.get("instructions"), personality: form.get("personality"), brief_summary: form.get("brief_summary"), brief_products: form.get("brief_products"), brief_audience: form.get("brief_audience"), brief_policies: form.get("brief_policies"), brief_dos: form.get("brief_dos"), brief_donts: form.get("brief_donts"), provider, model, prompt_language: lang, temperature, max_tokens: maxTokens, memory_limit: memoryLimit, phone_handover_minutes: phoneHandoverMinutes, reply_delay_min_seconds: replyDelayMin, reply_delay_max_seconds: replyDelayMax, image_enabled: imageEnabled, image_model: imageModel, audio_enabled: audioEnabled, audio_model: audioModel };
     try {
       setAgent(await api<Agent>(`/agents/${id}`, { method: "PATCH", body: JSON.stringify(payload) }));
       api<{ prompt: string }>(`/agents/${id}/prompt`).then((r) => setPromptTokens(estimateTokens(r.prompt))).catch(() => {});
@@ -182,6 +183,7 @@ export default function AgentDetailPage() {
         <div className="slider-field"><div className="slider-head"><span>{t("agents.detail.temperatureLabel")}</span><strong>{temperature.toFixed(1)}/2</strong></div><input type="range" min="0" max="2" step="0.1" value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} /><span className="field-help">{t("agents.detail.temperatureHint")}</span></div>
         <div className="slider-field"><div className="slider-head"><span>{t("agents.detail.maxTokensLabel")}</span><strong>{maxTokens}/8192</strong></div><input type="range" min="256" max="8192" step="256" value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} /><span className="field-help">{t("agents.detail.maxTokensHint")}</span></div>
         <div className="slider-field"><div className="slider-head"><span>{t("agents.detail.memoryLimitLabel")}</span><strong>{memoryLimit}/100</strong></div><input type="range" min="0" max="100" step="1" value={memoryLimit} onChange={(e) => setMemoryLimit(Number(e.target.value))} /><span className="field-help">{t("agents.detail.memoryLimitHint")}</span></div>
+        <label>{t("agents.detail.phoneHandoverLabel")}<input type="number" min="1" max="1440" required value={phoneHandoverMinutes} onChange={(e) => setPhoneHandoverMinutes(Number(e.target.value))} /><span className="field-help">{t("agents.detail.phoneHandoverHint")}</span></label>
         <div className="group-intro"><strong>{t("agents.detail.replyDelayHeading")}</strong></div>
         <div className="slider-field"><div className="slider-head"><span>{t("agents.detail.replyDelayMinLabel")} <AiHint text={t("agents.detail.replyDelayMinHint")} /></span><strong>{replyDelayMin}/60 s</strong></div><input type="range" min="0" max="60" step="1" value={replyDelayMin} onChange={(e) => { const v = Number(e.target.value); setReplyDelayMin(v); if (v > replyDelayMax) setReplyDelayMax(v); }} /></div>
         <div className="slider-field"><div className="slider-head"><span>{t("agents.detail.replyDelayMaxLabel")} <AiHint text={t("agents.detail.replyDelayMaxHint")} /></span><strong>{replyDelayMax}/60 s</strong></div><input type="range" min="0" max="60" step="1" value={replyDelayMax} onChange={(e) => { const v = Number(e.target.value); setReplyDelayMax(v); if (v < replyDelayMin) setReplyDelayMin(v); }} /></div>

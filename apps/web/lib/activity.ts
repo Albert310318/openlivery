@@ -14,6 +14,8 @@ export function activityText(t: TranslateFn, message: Message): string {
     case "unarchived": return t("portal.inbox.activity.unarchived", { actor });
     case "reopened": return t("portal.inbox.activity.reopened", { actor });
     case "reopened_by_contact": return t("portal.inbox.activity.reopened_by_contact");
+    case "answered_from_phone": return t("portal.inbox.activity.answered_from_phone", { actor });
+    case "resumed_after_phone": return t("portal.inbox.activity.resumed_after_phone");
     case "taken_over": return t("portal.inbox.activity.taken_over", { actor });
     case "returned_to_ai": return t("portal.inbox.activity.returned_to_ai", { actor });
     case "auto_resolved": return t("portal.inbox.activity.auto_resolved", { hours: String(details?.hours ?? "") });

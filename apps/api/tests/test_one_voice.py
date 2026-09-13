@@ -37,8 +37,8 @@ def test_the_label_carries_the_instruction_when_the_person_spoke_last():
         message("user", "visitor", "hi"),
     ], "en")
 
-    assert "do not greet again" in turns[0]["content"]
-    assert "Pick up whatever that person left open" in turns[0]["content"]
+    assert "avoid unnecessary greetings" in turns[0]["content"]
+    assert "Prioritize the customer's current message" in turns[0]["content"]
 
 
 def test_once_the_agent_has_answered_the_short_label_is_enough():
@@ -50,7 +50,7 @@ def test_once_the_agent_has_answered_the_short_label_is_enough():
     ], "en")
 
     assert turns[0]["content"].startswith("[Written by a person from the business]")
-    assert "do not greet again" not in turns[0]["content"]
+    assert "avoid unnecessary greetings" not in turns[0]["content"]
 
 
 def test_the_agents_own_turns_are_never_labelled():
@@ -84,10 +84,10 @@ def test_an_operator_reply_reaches_the_agent_labelled(authenticated_client: Test
         "/api/clients",
         json={"name": "Bakery", "industry": "restaurants_food", "business_type": "restaurant", "is_active": True},
     ).json()
-    client.put("/api/providers/openai", json={"api_key": "sk-test"})
+    client.put("/api/providers/openrouter", json={"api_key": "sk-test"})
     agent = client.post(
         "/api/agents",
-        json={"client_id": customer["id"], "provider": "openai", "model": "gpt-4.1-mini", "prompt_language": "en",
+        json={"client_id": customer["id"], "provider": "openrouter", "model": "openai/gpt-4.1-mini", "prompt_language": "en",
               "name": "Orders", "instructions": "Take orders.", "personality": "Warm", "is_active": True},
     ).json()
     conversation = customer_conversation(client, agent["id"])

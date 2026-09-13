@@ -38,3 +38,10 @@ export function SocialReplyNotice({ conversation, blocked, humanOnly }: { conver
         ? "social.policyUnavailable" : blocked ? "social.windowClosedHint" : "social.humanWindowHint";
   return <div className={`reply-policy-notice ${blocked ? "closed" : "human"}`} role="status"><Clock size={16} /><div><strong>{t(blocked ? "social.windowClosed" : "social.humanWindow")}</strong><small>{t(hint)}</small></div></div>;
 }
+
+
+export function PhonePauseNotice({ conversation, onKeepManual }: { conversation: Conversation; onKeepManual: () => void }) {
+  const t = useT();
+  if (!conversation.phone_pause_until || conversation.mode !== "human" || conversation.status === "resolved") return null;
+  return <div className="reply-policy-notice human" role="status"><Clock size={16} /><span>{t("portal.inbox.activity.phonePause", { time: new Date(conversation.phone_pause_until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })}</span><button type="button" className="button" onClick={onKeepManual}>{t("portal.inbox.activity.keepManual")}</button></div>;
+}

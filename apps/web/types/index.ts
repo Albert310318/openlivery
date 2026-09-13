@@ -69,6 +69,7 @@ export type Agent = {
   temperature: number;
   max_tokens: number;
   memory_limit: number;
+  phone_handover_minutes: number;
   reply_delay_min_seconds: number;
   reply_delay_max_seconds: number;
   image_enabled: boolean;
@@ -168,6 +169,7 @@ export type Conversation = {
   archived_at?: string | null;
   first_reply_at?: string | null;
   taken_over_at?: string | null;
+  phone_pause_until?: string | null;
   waiting_since?: string | null;
   assignee_id?: string | null;
   assignee_name?: string | null;

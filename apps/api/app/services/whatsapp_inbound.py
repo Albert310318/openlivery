@@ -127,7 +127,7 @@ async def process_inbound(
     same fields used here. ``conversation_channel`` and ``channel_fk_field``
     select the Conversation channel label and FK column for the caller.
     """
-    if conversation_channel == "whatsapp_cloud" and channel.coexistence:
+    if conversation_channel == "whatsapp" or (conversation_channel == "whatsapp_cloud" and channel.coexistence):
         from .whatsapp_coexistence import lock_chats
         lock_chats(db, channel.id, [peer for peer in (inbound.external_chat_id, inbound.sender_user_id) if peer])
     fk_column = getattr(Conversation, channel_fk_field)
@@ -254,7 +254,7 @@ async def process_inbound(
         # Kept for the record, answered by nobody, and no tokens spent: the
         # conversation stays out of the inboxes until the contact is unblocked.
         return InboundResult(accepted=True, conversation_id=conversation.id, mode=conversation.mode)
-    if conversation.mode == "human":
+    if conversation.mode == "human" or conversation.phone_pause_until is not None:
         # An operator took this conversation over, so nothing will answer unless
         # a person sees it. This is the moment a phone should ring.
         await notify_needs_human(db, conversation, display_content or llm_content)
@@ -555,7 +555,7 @@ async def _debounced_reply(conversation_id: uuid.UUID, delay: float) -> None:
     db = new_session()
     try:
         conversation = db.get(Conversation, conversation_id)
-        if not conversation or conversation.mode == "human":
+        if not conversation or conversation.mode == "human" or conversation.phone_pause_until is not None:
             return
         channel = conversation.whatsapp_channel or conversation.whatsapp_cloud_channel
         if not channel:

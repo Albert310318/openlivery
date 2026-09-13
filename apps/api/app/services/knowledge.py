@@ -277,16 +277,16 @@ _HUMAN_TURN = {
         "short": "[Escrito por una persona del negocio]",
         "last": (
             "[Escrito por una persona del negocio. Es lo último que dijo el negocio, así que continúa "
-            "desde ahí: no saludes de nuevo, no te presentes y no preguntes en qué puedes ayudar. "
-            "Retoma lo que esa persona dejó pendiente y responde a eso.]"
+            "desde ahí cuando siga siendo relevante. Prioriza el mensaje actual del cliente, respeta un cambio de tema "
+            "y no repitas saludos o presentaciones innecesariamente. No des por realizada una acción solo porque se mencionó.]"
         ),
     },
     "en": {
         "short": "[Written by a person from the business]",
         "last": (
             "[Written by a person from the business. It is the last thing the business said, so carry "
-            "on from there: do not greet again, do not introduce yourself and do not ask what you can "
-            "help with. Pick up whatever that person left open and answer that.]"
+            "on from there when it remains relevant. Prioritize the customer's current message, respect a change of topic "
+            "and avoid unnecessary greetings or introductions. Do not assume an action was completed just because it was mentioned.]"
         ),
     },
 }

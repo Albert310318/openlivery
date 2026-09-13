@@ -11,7 +11,7 @@ import { QuotedSnippet, ReactionBadge } from "@/components/message-gestures";
 import { ListRowsSkeleton } from "@/components/skeleton";
 import { useToast } from "@/components/toast";
 import { ChannelIcon, channelLabel as labelForChannel, INBOX_CHANNELS, isSocialChannel } from "@/lib/channels";
-import { SocialReplyNotice, useReplyPolicy } from "@/components/reply-policy";
+import { PhonePauseNotice, SocialReplyNotice, useReplyPolicy } from "@/components/reply-policy";
 import { api, ApiError, apiUrl, messageFrom } from "@/lib/api";
 import { formatTime, formatWhen, isNearBottom, isSameOpenThread } from "@/lib/datetime";
 import { useLanguage, useT } from "@/lib/i18n";
@@ -278,7 +278,7 @@ export default function InboxPage() {
                 );
               })}
             </div>
-            <SocialReplyNotice conversation={selected} blocked={policy.blocked} humanOnly={policy.humanOnly} />
+            <PhonePauseNotice conversation={selected} onKeepManual={() => toggleMode("human")} /><SocialReplyNotice conversation={selected} blocked={policy.blocked} humanOnly={policy.humanOnly} />
             {pendingFile && <PendingAttachment file={pendingFile} onCancel={() => setPendingFile(null)} />}
             <form className="inbox-composer" onSubmit={reply}>
               <AttachButton onFile={setPendingFile} disabled={!policy.canAttach || busy} title={t("chat.attachFile")} />

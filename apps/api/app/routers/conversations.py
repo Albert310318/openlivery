@@ -422,6 +422,9 @@ async def reply_as_human(
         conversation.updated_at = now_utc()
         db.commit()
         return _conversation(db, user, conversation_id)
+    if conversation.phone_pause_until is not None:
+        set_mode(db, conversation, "human")
+        db.commit()
     quoted_id, quoted_external = resolve_quote(db, conversation, payload.quoted_message_id)
     external_message_id = await send_channel_message(
         db, conversation, payload.content.strip(), quoted_external_id=quoted_external
@@ -437,6 +440,8 @@ async def reply_as_human(
             quoted_message_id=quoted_id,
         )
     )
+    from ..services.phone_handover import cancel_phone_pause
+    cancel_phone_pause(conversation)
     note_reply(conversation)
     conversation.updated_at = now_utc()
     db.commit()

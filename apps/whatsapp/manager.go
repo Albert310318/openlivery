@@ -84,11 +84,15 @@ func (r *channelRuntime) requestStop() {
 	r.mu.Unlock()
 }
 
+// A message of our own older than this is history being replayed after a
+// reconnect, not something a person just typed on the phone.
+
 type manager struct {
 	api       *backendClient
 	container *sqlstore.Container
 	log       waLog.Logger
 	cache     *messageCache
+	echoes    *echoSet
 
 	mu       sync.Mutex
 	runtimes map[string]*channelRuntime
@@ -100,6 +104,7 @@ func newManager(api *backendClient, container *sqlstore.Container, log waLog.Log
 		container: container,
 		log:       log,
 		cache:     newMessageCache(),
+		echoes:    newEchoSet(),
 		runtimes:  make(map[string]*channelRuntime),
 	}
 }
@@ -306,6 +311,9 @@ func (m *manager) processIncoming(ctx context.Context, runtime *channelRuntime, 
 			fromMe: evt.Info.IsFromMe,
 		})
 	}
+	if isDirectOutgoing(evt.Info) {
+		return m.forwardOwnMessage(ctx, runtime, evt)
+	}
 	if !isDirectIncoming(evt.Info) {
 		return nil
 	}
@@ -366,6 +374,44 @@ func (m *manager) processIncoming(ctx context.Context, runtime *channelRuntime, 
 	return nil
 }
 
+// forwardOwnMessage records what the business typed on the phone itself. The
+// agent reads it as its own previous turn, so the conversation keeps one voice
+// and it stops answering over a person. It never produces a reply.
+func (m *manager) forwardOwnMessage(ctx context.Context, runtime *channelRuntime, evt *events.Message) error {
+	if m.echoes.sentByUs(runtime.channelID, evt.Info.ID) {
+		return nil
+	}
+	text := incomingText(evt.Message)
+	media := incomingMedia(evt.Message)
+	if text == "" && media == nil {
+		return nil
+	}
+	body := map[string]any{
+		"external_message_id": evt.Info.ID,
+		"remote_jid":          m.remoteJIDFor(ctx, runtime, evt.Info.Chat),
+		"text":                text,
+	}
+	if media != nil {
+		body["media_kind"] = media.kind
+	}
+	if !evt.Info.Timestamp.IsZero() {
+		body["occurred_at"] = evt.Info.Timestamp.UTC().Format(time.RFC3339Nano)
+	}
+	return m.api.call(ctx, http.MethodPost, "/channels/"+runtime.channelID+"/outgoing", body, nil, 0)
+}
+
+type messageSender interface {
+	GenerateMessageID() types.MessageID
+	SendMessage(context.Context, types.JID, *waE2E.Message, ...whatsmeow.SendRequestExtra) (whatsmeow.SendResponse, error)
+}
+
+// Register before transmission: an echo can arrive before the send is acknowledged.
+func (m *manager) sendTracked(ctx context.Context, channelID string, client messageSender, jid types.JID, message *waE2E.Message) (whatsmeow.SendResponse, error) {
+	id := client.GenerateMessageID()
+	m.echoes.remember(channelID, id)
+	return client.SendMessage(ctx, jid, message, whatsmeow.SendRequestExtra{ID: id})
+}
+
 func (m *manager) sendMessage(ctx context.Context, channelID, remoteJID, text string, media *outboundMedia, quoteExternalID string) (string, error) {
 	runtime := m.runtime(channelID)
 	if runtime == nil || runtime.stopped() {
@@ -388,7 +434,7 @@ func (m *manager) sendMessage(ctx context.Context, channelID, remoteJID, text st
 			ContextInfo: m.quoteContext(runtime, channelID, jid, quoteExternalID),
 		}}
 	}
-	sent, err := runtime.client.SendMessage(ctx, jid, message)
+	sent, err := m.sendTracked(ctx, channelID, runtime.client, jid, message)
 	if err != nil {
 		return "", err
 	}
@@ -397,7 +443,7 @@ func (m *manager) sendMessage(ctx context.Context, channelID, remoteJID, text st
 	}
 	// Audio messages have no caption on WhatsApp; deliver it as a follow-up text.
 	if media != nil && media.kind == "audio" && text != "" {
-		if _, err := runtime.client.SendMessage(ctx, jid, &waE2E.Message{Conversation: proto.String(text)}); err != nil {
+		if _, err := m.sendTracked(ctx, channelID, runtime.client, jid, &waE2E.Message{Conversation: proto.String(text)}); err != nil {
 			m.log.Errorf("channel %s: could not send the audio caption: %v", channelID, err)
 		}
 	}
@@ -597,6 +643,7 @@ func (m *manager) sendReaction(ctx context.Context, channelID, remoteJID, target
 func (m *manager) disconnectChannel(ctx context.Context, channelID string) error {
 	runtime := m.runtime(channelID)
 	m.cache.drop(channelID)
+	m.echoes.drop(channelID)
 	if runtime != nil {
 		runtime.requestStop()
 		m.dropRuntime(runtime)

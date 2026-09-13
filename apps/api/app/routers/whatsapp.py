@@ -22,6 +22,7 @@ from ..schemas import (
     WhatsAppInternalAuth,
     WhatsAppInternalStatus,
     WhatsAppOutboundConfirm,
+    WhatsAppOutgoing,
 )
 from ..security import decrypt_secret, encrypt_secret
 from ..services.whatsapp import bridge_command
@@ -273,3 +274,14 @@ def confirm_outbound(channel_id: uuid.UUID, payload: WhatsAppOutboundConfirm, db
         raise HTTPException(status_code=404, detail="Message not found")
     message.external_message_id = payload.external_message_id
     db.commit()
+
+
+@internal_router.post("/channels/{channel_id}/outgoing", status_code=204)
+def outgoing_message(channel_id: uuid.UUID, payload: WhatsAppOutgoing,
+                     x_bridge_token: str | None = Header(default=None), db: Session = Depends(get_db)):
+    _require_bridge(x_bridge_token)
+    channel = _internal_channel(db, channel_id)
+    if not channel.is_enabled:
+        raise HTTPException(status_code=409, detail="WhatsApp is disconnected")
+    from ..services.phone_handover import record_outgoing
+    record_outgoing(db, channel, payload)

@@ -174,6 +174,7 @@ class Agent(Base):
     # between these two bounds (seconds) so the pace varies like a person's.
     # The window restarts on every new visitor message, batching a burst into
     # one reply. Both at 0 answers each message immediately.
+    phone_handover_minutes: Mapped[int] = mapped_column(Integer, default=10, server_default="10")
     reply_delay_min_seconds: Mapped[int] = mapped_column(Integer, default=6, server_default="6")
     reply_delay_max_seconds: Mapped[int] = mapped_column(Integer, default=9, server_default="9")
     # Set when the agent is deleted. The row stays so the conversations it
@@ -541,6 +542,8 @@ class Conversation(Base):
     # First reply of any kind (AI or person) after the conversation opened.
     first_reply_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # When a person last took the conversation over from the AI.
+    phone_pause_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    phone_resume_claimed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     taken_over_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # The portal user handling this conversation, when a person is. Cleared
     # when it goes back to the AI or is released for someone else to take.

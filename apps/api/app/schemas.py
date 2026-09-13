@@ -216,6 +216,7 @@ class AgentBase(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int = Field(default=2048, ge=1, le=32000)
     memory_limit: int = Field(default=30, ge=0, le=200)
+    phone_handover_minutes: int = Field(default=10, ge=1, le=1440)
     reply_delay_min_seconds: int = Field(default=6, ge=0, le=REPLY_DELAY_MAX_SECONDS)
     reply_delay_max_seconds: int = Field(default=9, ge=0, le=REPLY_DELAY_MAX_SECONDS)
     image_enabled: bool = True
@@ -251,6 +252,7 @@ class AgentUpdate(BaseModel):
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     max_tokens: int | None = Field(default=None, ge=1, le=32000)
     memory_limit: int | None = Field(default=None, ge=0, le=200)
+    phone_handover_minutes: int | None = Field(default=None, ge=1, le=1440)
     reply_delay_min_seconds: int | None = Field(default=None, ge=0, le=REPLY_DELAY_MAX_SECONDS)
     reply_delay_max_seconds: int | None = Field(default=None, ge=0, le=REPLY_DELAY_MAX_SECONDS)
     image_enabled: bool | None = None
@@ -278,6 +280,7 @@ class AgentOut(ORMModel):
     temperature: float
     max_tokens: int
     memory_limit: int
+    phone_handover_minutes: int
     reply_delay_min_seconds: int
     reply_delay_max_seconds: int
     image_enabled: bool
@@ -352,6 +355,7 @@ class ConversationOut(ORMModel):
     resolved_at: datetime | None = None
     archived_at: datetime | None = None
     first_reply_at: datetime | None = None
+    phone_pause_until: datetime | None = None
     taken_over_at: datetime | None = None
     waiting_since: datetime | None = None
     assignee_id: uuid.UUID | None = None
@@ -1034,3 +1038,18 @@ class WhatsAppInboundResult(BaseModel):
 class WhatsAppOutboundConfirm(BaseModel):
     message_id: uuid.UUID
     external_message_id: str = Field(min_length=1, max_length=255)
+
+
+class WhatsAppOutgoing(BaseModel):
+    external_message_id: str = Field(min_length=1, max_length=255)
+    remote_jid: str = Field(min_length=1, max_length=255)
+    text: str = Field(default="", max_length=100000)
+    media_kind: str | None = Field(default=None, pattern=r"^(image|audio|video|sticker|document|other)$")
+    occurred_at: datetime | None = None
+
+    @field_validator("occurred_at")
+    @classmethod
+    def aware_timestamp(cls, value):
+        if value is not None and value.utcoffset() is None:
+            raise ValueError("The message timestamp must include a timezone")
+        return value

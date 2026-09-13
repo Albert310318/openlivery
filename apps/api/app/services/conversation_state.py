@@ -32,6 +32,8 @@ def ensure_open(conversation: Conversation) -> None:
 
 # English fallbacks for clients that do not translate events themselves.
 _ACTIVITY_TEXT = {
+    "answered_from_phone": "{actor} replied from the phone; the AI is temporarily paused",
+    "resumed_after_phone": "The phone pause ended; the AI can reply again",
     "routed_by_tag": "Routed to {target}: the contact is tagged {tag}",
     "resolved": "{actor} resolved the conversation",
     "reopened": "{actor} reopened the conversation",
@@ -91,6 +93,8 @@ def set_status(db: Session, conversation: Conversation, status: str, *, actor: s
     conversation.status = status
     conversation.status_changed_at = now
     if status == "resolved":
+        from .phone_handover import cancel_phone_pause
+        cancel_phone_pause(conversation)
         conversation.resolved_at = now
         conversation.waiting_since = None
         record_activity(db, conversation, "resolved", actor=actor)
@@ -127,9 +131,12 @@ def set_mode(
     Taking over from the portal also hands the conversation to that person;
     giving it back to the AI releases it, since nobody is handling it now.
     """
-    if conversation.mode == mode:
+    from .phone_handover import cancel_phone_pause
+    timed = conversation.phone_pause_until is not None
+    if conversation.mode == mode and not timed:
         return False
     ensure_open(conversation)
+    cancel_phone_pause(conversation)
     conversation.mode = mode
     now = now_utc()
     if mode == "human":
@@ -158,8 +165,12 @@ def assign(
     thread says what happened in the words people use: took it, assigned
     it, transferred it, released it.
     """
+    from .phone_handover import cancel_phone_pause
+    timed = conversation.phone_pause_until is not None and assignee is not None
+    if timed:
+        cancel_phone_pause(conversation)
     new_id = assignee.id if assignee else None
-    if conversation.assignee_id == new_id and (assignee is None or conversation.mode == "human"):
+    if not timed and conversation.assignee_id == new_id and (assignee is None or conversation.mode == "human"):
         return False
     ensure_open(conversation)
     previous = conversation.assignee

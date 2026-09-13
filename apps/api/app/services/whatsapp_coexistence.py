@@ -141,11 +141,14 @@ def _messages(db, channel, rows, *, historical):
                 agency_id=channel.agency_id, client_id=channel.client_id, agent_id=channel.agent_id,
                 channel="whatsapp_cloud", whatsapp_cloud_channel_id=channel.id, external_chat_id=peer,
                 title=display_name(contact)[:240], contact_id=contact.id, contact_name=contact.name or None,
-                mode="human", status="resolved" if historical else "open", created_at=occurred, updated_at=occurred,
+                mode="human" if historical else "ai", status="resolved" if historical else "open", created_at=occurred, updated_at=occurred,
                 resolved_at=occurred if historical else None)
             db.add(conversation)
             by_peer[peer] = conversation
             if not historical:
+                db.flush()
+                from .routing import route_new_conversation_by_tags
+                route_new_conversation_by_tags(db, conversation, contact)
                 by_contact[contact.id] = conversation
         if historical:
             conversation.created_at = min(conversation.created_at, occurred)
@@ -154,8 +157,8 @@ def _messages(db, channel, rows, *, historical):
             conversation.external_chat_id = peer
             # A retry is deduplicated above, so it cannot take over again after
             # an operator has explicitly returned the conversation to the AI.
-            conversation.mode = "human"
-            conversation.taken_over_at = now_utc()
+            from .phone_handover import pause_from_phone
+            pause_from_phone(db, conversation, occurred_at=occurred, actor="WhatsApp Business")
             conversation.social_reply_due_at = None
             conversation.social_reply_claimed_until = None
             if not conversation.waiting_since or occurred + timedelta(seconds=1) >= conversation.waiting_since:
@@ -427,6 +430,8 @@ async def process_pending(db, *, limit=2, batch_size=100):
 
 
 async def run_scope(db):
+    from .phone_handover import resume_due
+    await resume_due(db)
     ids = db.scalars(select(WhatsAppCloudChannel.id).where(WhatsAppCloudChannel.coexistence.is_(True),
         WhatsAppCloudChannel.is_enabled.is_(True))).all()
     for channel_id in ids:

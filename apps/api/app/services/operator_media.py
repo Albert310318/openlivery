@@ -73,6 +73,9 @@ async def store_operator_media_reply(
     portal_user_id=None,
 ) -> None:
     """Caller must have verified the conversation is in human mode."""
+    from .phone_handover import cancel_phone_pause
+    if cancel_phone_pause(conversation):
+        db.commit()
     content_type = (file.content_type or "").lower() or "application/octet-stream"
     filename = file.filename
     kind = attachment_kind(content_type)
