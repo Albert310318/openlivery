@@ -6,7 +6,7 @@
 
 ## Qué registra una respuesta
 
-Cada respuesta de IA deja una fila en `usage_records` con los tokens que usó, lo que costó según lo reportó OpenRouter (`cost_usd`), el proveedor que la sirvió (`served_by`, por ejemplo Azure o Google AI Studio), los tokens cacheados y de razonamiento, cuánto tardó el modelo (`duration_ms`), y la conversación y el mensaje a los que pertenece. Las transcripciones de notas de voz y las descripciones de imágenes no dejan fila; solo las respuestas de chat.
+Cada respuesta de IA deja una fila en `usage_records` con los tokens que usó, lo que costó según lo reportó OpenRouter (`cost_usd`), el proveedor que la sirvió (`served_by`, por ejemplo Azure o Google AI Studio), los tokens cacheados y de razonamiento, cuánto tardó el modelo (`duration_ms`), y la conversación y el mensaje a los que pertenece. Las transcripciones de notas de voz y las descripciones de imágenes también dejan fila, ligadas a la conversación y al agente; una transcripción servida por tu propia key del proveedor vuelve de OpenRouter sin precio, así que se valora al precio de lista de voz a texto del catálogo y se marca como estimada.
 
 Las filas anteriores a la versión 0.4 solo traen tokens. Reportes las valora al precio de lista del catálogo para ese modelo (`apps/api/app/services/model_catalog.py`) y las marca como **estimadas**, en la fila y en el indicador que las cuenta.
 

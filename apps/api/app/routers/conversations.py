@@ -325,6 +325,7 @@ async def send_media_message(
             media_bytes=data,
             media_mime=content_type,
         ),
+        conversation=conversation,
     )
 
     if not conversation.messages and caption:

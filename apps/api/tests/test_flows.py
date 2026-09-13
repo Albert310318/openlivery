@@ -504,7 +504,7 @@ def test_media_message_uses_image_capability(authenticated_client: TestClient, m
     assert agent["image_enabled"] is True
     conversation = client.post("/api/conversations", json={"agent_id": agent["id"]}).json()
 
-    monkeypatch.setattr(whatsapp_inbound_service, "describe_image", AsyncMock(return_value="a red pepperoni pizza"))
+    monkeypatch.setattr(whatsapp_inbound_service, "describe_image", AsyncMock(return_value=ai_service.Completion(text="a red pepperoni pizza")))
     fake_completion = AsyncMock(return_value=ai_service.Completion(text="Looks delicious!"))
     monkeypatch.setattr(conversations_router, "run_completion", fake_completion)
     sent = client.post(
@@ -854,7 +854,7 @@ def test_whatsapp_inbound_image_uses_capability(authenticated_client: TestClient
     channel = client.put(f"/api/whatsapp/channels/{customer['id']}", json={"agent_id": agent["id"]}).json()
     headers = {"X-Bridge-Token": get_settings().whatsapp_bridge_token}
 
-    monkeypatch.setattr(whatsapp_inbound_service, "describe_image", AsyncMock(return_value="a photo of the menu"))
+    monkeypatch.setattr(whatsapp_inbound_service, "describe_image", AsyncMock(return_value=ai_service.Completion(text="a photo of the menu")))
     fake_completion = AsyncMock(return_value=ai_service.Completion(text="Here are the dishes!"))
     monkeypatch.setattr(whatsapp_inbound_service, "run_completion", fake_completion)
     inbound = client.post(

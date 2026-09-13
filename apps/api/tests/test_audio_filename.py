@@ -27,7 +27,7 @@ def test_playground_voice_note_is_transcribed_under_its_real_container(authentic
     ).json()
     conversation = client.post("/api/conversations", json={"agent_id": agent["id"]}).json()
 
-    transcribe = AsyncMock(return_value="quiero una pizza mediana")
+    transcribe = AsyncMock(return_value=ai_service.Completion(text="quiero una pizza mediana"))
     monkeypatch.setattr(whatsapp_inbound, "transcribe_audio", transcribe)
     completion = AsyncMock(return_value=ai_service.Completion(text="Claro"))
     monkeypatch.setattr(conversations_router, "run_completion", completion)

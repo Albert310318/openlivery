@@ -96,7 +96,17 @@ _MODELS: tuple[ModelInfo, ...] = (
               0.0002, 0.000696, "Open weights", "Meta's open model, cheap and multimodal."),
 )
 
-_BY_ID: dict[str, ModelInfo] = {model.id: model for model in _MODELS}
+# Speech-to-text models, priced so a transcription the provider did not price
+# (OpenRouter reports no vendor charge for audio) can be valued at list price.
+# Never offered as chat models. Audio tokens in, text tokens out.
+_AUDIO_MODEL_INFO: tuple[ModelInfo, ...] = (
+    ModelInfo("openai/gpt-4o-mini-transcribe", "openai", "GPT-4o mini Transcribe", "transcribe", 16_000, 2_000, False, False,
+              0.003, 0.005),
+    ModelInfo("openai/gpt-4o-transcribe", "openai", "GPT-4o Transcribe", "transcribe", 16_000, 2_000, False, False,
+              0.006, 0.01),
+)
+
+_BY_ID: dict[str, ModelInfo] = {model.id: model for model in (*_MODELS, *_AUDIO_MODEL_INFO)}
 
 
 def list_models() -> list[ModelInfo]:
@@ -105,7 +115,7 @@ def list_models() -> list[ModelInfo]:
 
 
 def get_model(model_id: str) -> ModelInfo | None:
-    """Metadata for a model by its ID, or None if not in the catalog."""
+    """Metadata for a model by its ID (chat or audio), or None if not in the catalog."""
     return _BY_ID.get(model_id)
 
 

@@ -299,7 +299,7 @@ async def process_event(db: Session, channel: SocialChannel, event: dict) -> Non
             store_attachment(db, incoming, data=blob, mime=blob_mime, kind=media_kind)
             _, context = await resolve_inbound_content(db, channel.agent, InboundMessage(
                 external_message_id=mid, external_chat_id=person,
-                media_kind=media_kind, media_bytes=blob, media_mime=blob_mime))
+                media_kind=media_kind, media_bytes=blob, media_mime=blob_mime), conversation=conversation)
             incoming.llm_content = (incoming.llm_content or incoming.content) + "\n" + context
     if event.get("_standby"):
         conversation.social_thread_owned = False

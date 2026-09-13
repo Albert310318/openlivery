@@ -12,6 +12,7 @@ from conftest import TestingSession
 from app.models import Message, UsageRecord
 from app.routers import conversations as conversations_router
 from app.services import ai as ai_service
+from app.services import whatsapp_inbound as whatsapp_inbound_service
 
 
 def _period() -> str:
@@ -89,6 +90,42 @@ def test_replies_are_linked_priced_and_rolled_up(authenticated_client: TestClien
     lines = csv_resp.text.strip().splitlines()
     assert lines[0].startswith("date,reply_id,conversation,contact,client,agent,channel,model,served_by")
     assert len(lines) == 3 and lines[1].endswith(",0.200000,yes,") and lines[2].endswith(",0.500000,,1200")
+
+
+def test_media_calls_are_recorded_against_the_conversation(authenticated_client: TestClient, monkeypatch):
+    """A voice note or image the agent had transcribed or described is usage
+    like any reply: linked to the conversation, with the vendor that served it,
+    and priced from the catalog when the provider reported no vendor charge."""
+    client = authenticated_client
+    customer, agent, conversation = _setup(client)
+    client.patch(f"/api/agents/{agent['id']}", json={"audio_enabled": True, "image_enabled": True, "image_model": "openai/gpt-4.1"})
+    # OpenRouter's audio endpoint: input/output token names, BYOK with no upstream cost.
+    transcription = ai_service.completion_from(
+        "quiero reservar",
+        ai_service.read_usage({"usage": {"input_tokens": 1_000_000, "output_tokens": 0, "cost": 0, "is_byok": True}}),
+        {"provider": "OpenAI"},
+    )
+    assert transcription.cost_usd is None and transcription.input_tokens == 1_000_000 and transcription.served_by == "OpenAI"
+    monkeypatch.setattr(whatsapp_inbound_service, "transcribe_audio", AsyncMock(return_value=transcription))
+    monkeypatch.setattr(whatsapp_inbound_service, "describe_image", AsyncMock(return_value=ai_service.Completion(
+        text="a menu", input_tokens=500, output_tokens=20, cost_usd=0.001, served_by="Azure")))
+    monkeypatch.setattr(conversations_router, "run_completion", AsyncMock(return_value=ai_service.Completion(text="Listo")))
+
+    resp = client.post(f"/api/conversations/{conversation['id']}/media", files={"file": ("note.ogg", b"ogg", "audio/ogg")})
+    assert resp.status_code == 200, resp.text
+    resp = client.post(f"/api/conversations/{conversation['id']}/media", files={"file": ("menu.jpg", b"jpg", "image/jpeg")})
+    assert resp.status_code == 200, resp.text
+
+    rows = client.get(f"/api/reports/replies?{_period()}").json()["items"]
+    by_model = {row["model"]: row for row in rows}
+    audio = by_model["openai/gpt-4o-mini-transcribe"]
+    # A million audio tokens on mini-transcribe at $3 per million, estimated.
+    assert audio["cost_usd"] == 3.0 and audio["estimated"] is True and audio["served_by"] == "OpenAI"
+    assert audio["conversation_id"] == conversation["id"] and audio["agent_name"] == "Host"
+    image = by_model["openai/gpt-4.1"]
+    assert image["cost_usd"] == 0.001 and image["estimated"] is False and image["served_by"] == "Azure"
+    assert image["conversation_id"] == conversation["id"]
+    assert len(rows) == 2  # the stubbed chat replies used no tokens, so nothing else is recorded
 
 
 def test_reports_need_a_session_and_start_empty(client: TestClient):

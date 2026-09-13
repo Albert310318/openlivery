@@ -415,7 +415,7 @@ def test_webhook_image_uses_capability(authenticated_client: TestClient, monkeyp
     client = authenticated_client
     _customer, _agent, channel = _setup_channel(client, image_enabled=True)
     monkeypatch.setattr(webhook_router, "fetch_media", AsyncMock(return_value=(b"fake-image-bytes", "image/jpeg")))
-    monkeypatch.setattr(whatsapp_inbound_service, "describe_image", AsyncMock(return_value="a photo of the menu"))
+    monkeypatch.setattr(whatsapp_inbound_service, "describe_image", AsyncMock(return_value=ai_service.Completion(text="a photo of the menu")))
     fake_completion = AsyncMock(return_value=ai_service.Completion(text="Here are the dishes!"))
     monkeypatch.setattr(whatsapp_inbound_service, "run_completion", fake_completion)
     monkeypatch.setattr(webhook_router, "send_text", AsyncMock(return_value="wamid.out-img"))
