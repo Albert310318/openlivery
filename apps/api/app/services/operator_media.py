@@ -15,7 +15,7 @@ from .attachments import MAX_ATTACHMENT_BYTES, attachment_kind, store_attachment
 from .media import audio_filename, describe_image, transcribe_audio
 from .model_catalog import DEFAULT_AUDIO_MODEL
 from .providers import DEFAULT_PROVIDER, resolve_provider_credentials
-from .usage import record_usage
+from .usage import record_usage, schedule_generation_reconcile
 from .whatsapp import send_channel_media
 
 
@@ -55,7 +55,8 @@ async def _operator_media_llm_text(
             else:
                 model = agent.audio_model.strip() or DEFAULT_AUDIO_MODEL
                 result = await transcribe_audio(base_url, api_key, model, data, filename or audio_filename(mime), mime)
-            record_usage(db, agent.agency_id, agent.id, DEFAULT_PROVIDER, model, result, conversation=conversation, message=message)
+            record = record_usage(db, agent.agency_id, agent.id, DEFAULT_PROVIDER, model, result, conversation=conversation, message=message)
+            schedule_generation_reconcile(record, result, base_url, api_key)
             detail = result.text or ""
         except (HTTPException, ValueError):
             detail = ""

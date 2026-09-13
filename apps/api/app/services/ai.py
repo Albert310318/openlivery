@@ -54,6 +54,9 @@ class Completion:
     # Wall-clock time the whole completion took (tool rounds included); set
     # by run_completion.
     duration_ms: int | None = None
+    # The router's id for the call, to read its record later when the
+    # response left the cost out (speech-to-text does).
+    generation_id: str = ""
 
 
 # Substrings in a provider's 400 error that mean a sampling parameter is not
@@ -121,6 +124,7 @@ def completion_from(text: str, usage: Usage, data: dict, tool_calls: list[dict] 
         cached_tokens=usage.cached_tokens,
         reasoning_tokens=usage.reasoning_tokens,
         served_by=str(data.get("provider") or ""),
+        generation_id=str(data.get("id") or ""),
     )
 
 

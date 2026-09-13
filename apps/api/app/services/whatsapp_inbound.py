@@ -28,7 +28,7 @@ from .routing import route_new_conversation_by_tags
 from .model_catalog import DEFAULT_AUDIO_MODEL
 from .providers import DEFAULT_PROVIDER, resolve_agent_credentials, resolve_provider_credentials
 from .tools import run_completion
-from .usage import record_usage
+from .usage import record_usage, schedule_generation_reconcile
 from .escalation import (
     active_rules as escalation_active_rules,
     apply_escalation,
@@ -113,12 +113,14 @@ async def resolve_inbound_content(
                 + (f" El cliente escribió: {text}" if text else "")
             )
             described = await describe_image(base_url, api_key, model, data, inbound.media_mime or "image/jpeg", instruction)
-            record_usage(db, agent.agency_id, agent.id, DEFAULT_PROVIDER, model, described, conversation=conversation, message=message)
+            record = record_usage(db, agent.agency_id, agent.id, DEFAULT_PROVIDER, model, described, conversation=conversation, message=message)
+            schedule_generation_reconcile(record, described, base_url, api_key)
             return text, (f"{text}\n\n" if text else "") + f"[Imagen recibida] {described.text}"
         model = agent.audio_model.strip() or DEFAULT_AUDIO_MODEL
         mime = inbound.media_mime or "audio/ogg"
         transcribed = await transcribe_audio(base_url, api_key, model, data, audio_filename(mime), mime)
-        record_usage(db, agent.agency_id, agent.id, DEFAULT_PROVIDER, model, transcribed, conversation=conversation, message=message)
+        record = record_usage(db, agent.agency_id, agent.id, DEFAULT_PROVIDER, model, transcribed, conversation=conversation, message=message)
+        schedule_generation_reconcile(record, transcribed, base_url, api_key)
         return text, (f"{text}\n\n" if text else "") + (transcribed.text or _media_placeholder("audio"))
     except (HTTPException, ValueError):
         return text, text or _media_placeholder(inbound.media_kind)
