@@ -280,6 +280,8 @@ def test_tool_loop_round_trip(monkeypatch):
     assert tool["function"]["name"] == "check_order"
     assert "When to use:" in tool["function"]["description"]
     assert tool["function"]["parameters"]["required"] == ["order_id"]
+    # Stated explicitly: an omitted strict is read as strict mode by some routes.
+    assert tool["function"]["strict"] is False
 
     # The tool endpoint got the substituted path and decrypted auth header.
     assert tool_call["url"] == "https://api.example.test/orders/42"

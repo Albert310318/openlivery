@@ -43,7 +43,13 @@ async def tool_loop(
     url = chat_url(base_url)
     headers = auth_headers(api_key)
     convo: list[dict] = [{"role": m["role"], "content": m["content"]} for m in messages]
-    tools = [{"type": "function", "function": {"name": s.name, "description": s.description, "parameters": s.input_schema}} for s in specs]
+    # strict is stated explicitly: some routes treat an omitted value as
+    # strict mode, where the model must emit every property in the schema
+    # and fills the optional ones with empty values.
+    tools = [
+        {"type": "function", "function": {"name": s.name, "description": s.description, "parameters": s.input_schema, "strict": False}}
+        for s in specs
+    ]
     sampling = sampling_params(temperature, max_tokens)
     usage = Usage()
     metadata: list[dict] = []

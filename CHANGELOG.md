@@ -233,6 +233,7 @@ Docker stack; run `alembic upgrade head` on local setups).
   the members of its tray instead of every portal device.
 
 ### Fixed
+- Tool definitions sent to the model now state `strict: false` explicitly. Some routes read an omitted value as strict mode and made the model fill every optional property with empty values, so tools with large nested schemas (calendar events, bookings) were rejected by the upstream API.
 - The login top bar kept a white background under the dark theme.
 - Disconnecting an Instagram or Messenger channel now **removes it** and
   releases the account: the page starts over with "Connect account" and the
