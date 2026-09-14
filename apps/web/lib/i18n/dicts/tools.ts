@@ -1,7 +1,7 @@
-// UI strings for the agent "tools" tab (HTTP tools + MCP servers). Fill `en`
-// and mirror it in `es`.
+// UI strings for the agent "Integrations" tab (HTTP tools + MCP servers).
+// Fill `en` and mirror it in `es`.
 const en = {
-  tab: "Tools",
+  tab: "Integrations",
   heading: "Custom tools",
   copy: "Connect HTTP endpoints and MCP servers the agent can call during a conversation.",
   addHttp: "New HTTP tool",
@@ -11,6 +11,7 @@ const en = {
   badgeHttp: "HTTP",
   badgeMcp: "MCP",
   mcpToolCount: "{count} tools discovered",
+  mcpToolsEnabled: "{enabled} of {count} tools enabled",
   enabled: "Enabled",
   edit: "Edit",
   delete: "Delete",
@@ -65,13 +66,20 @@ const en = {
     testNote: "Test the connection before saving. The Add server button stays disabled until the test succeeds.",
     testSuccess: "Connection OK: {count} tools discovered.",
     discoveredTools: "Discovered tools",
+    toolsTitle: "Enabled tools",
+    toolsHint: "The agent only sees the tools you enable. Tools the server marks as modifying data are flagged.",
+    selectAll: "Select all",
+    selectNone: "Select none",
+    readOnly: "read only",
+    destructive: "modifies data",
+    noneSelected: "Enable at least one tool or the agent will not be able to use this server.",
     addServer: "Add server",
     save: "Save changes",
   },
 };
 
 const es: typeof en = {
-  tab: "Herramientas",
+  tab: "Integraciones",
   heading: "Herramientas personalizadas",
   copy: "Conecta endpoints HTTP y servidores MCP que el agente puede usar durante una conversación.",
   addHttp: "Nueva herramienta HTTP",
@@ -81,6 +89,7 @@ const es: typeof en = {
   badgeHttp: "HTTP",
   badgeMcp: "MCP",
   mcpToolCount: "{count} herramientas descubiertas",
+  mcpToolsEnabled: "{enabled} de {count} herramientas activas",
   enabled: "Activa",
   edit: "Editar",
   delete: "Eliminar",
@@ -135,6 +144,13 @@ const es: typeof en = {
     testNote: "Prueba la conexión antes de guardar. El botón Añadir servidor queda deshabilitado hasta que la prueba funcione.",
     testSuccess: "Conexión OK: {count} herramientas descubiertas.",
     discoveredTools: "Herramientas descubiertas",
+    toolsTitle: "Herramientas activas",
+    toolsHint: "El agente solo ve las herramientas que actives. Las que el servidor marca como que modifican datos van señaladas.",
+    selectAll: "Seleccionar todas",
+    selectNone: "Ninguna",
+    readOnly: "solo lectura",
+    destructive: "modifica datos",
+    noneSelected: "Activa al menos una herramienta o el agente no podrá usar este servidor.",
     addServer: "Añadir servidor",
     save: "Guardar cambios",
   },

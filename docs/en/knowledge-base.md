@@ -13,14 +13,14 @@ See [Agents](agents.md) for where these live in the agent editor.
 
 ## How PDFs are processed
 
-When you upload a PDF, its text is extracted immediately with `pypdf` and stored on the document. If no text can be extracted (for example a scanned, image-only PDF), the document is marked as `error` and is not used. Extracted text is then split into paragraph-sized chunks. When the agency has an OpenRouter key, each chunk is embedded with `openai/text-embedding-3-small` and the vector is saved alongside it; embedding is best-effort, so if it is unavailable the agent still works using keyword search.
+When you upload a PDF, its text is extracted immediately with `pypdf` and stored on the document. If no text can be extracted (for example a scanned, image-only PDF), the document is marked as `error` and is not used. Extracted text is then split into paragraph-sized chunks. When the agency has an OpenRouter key, each chunk is embedded with the agent's **embedding model** (`openai/text-embedding-3-small` by default, chosen in the Knowledge tab from OpenRouter's embedding catalog) and the vector is saved alongside it, tagged with the model that produced it; embedding is best-effort, so if it is unavailable the agent still works using keyword search. Vectors from different models are not comparable, so changing the model reindexes every document of the agent, and **Reindex documents** repairs uploads that were indexed without a working key.
 
 ## How retrieval works
 
 On each incoming message, OpenLivery decides how much document text to include:
 
 - **Small knowledge bases are sent in full.** When the combined extracted text of all processed documents is at or below **45,000 characters**, every document is included verbatim — no search step.
-- **Larger knowledge bases are retrieved.** Above that threshold, OpenLivery runs semantic search: it embeds the user's query and ranks stored chunks by cosine similarity, then fills the context up to a search budget. If embeddings are unavailable, it falls back to keyword ranking over the chunks.
+- **Larger knowledge bases are retrieved.** Above that threshold, OpenLivery runs semantic search: it embeds the user's query with the agent's model and ranks the chunks indexed with that same model by cosine similarity, keeping the ten best and dropping any that scores well below the top match, within a search budget. If embeddings are unavailable, it falls back to keyword ranking over the chunks.
 
 Embeddings are stored as a plain **JSON array of floats** and similarity is computed in Python, so **no database extension is required** — the knowledge base is portable across any PostgreSQL. See [AI providers](ai-providers.md) for configuring the connection used for embeddings.
 

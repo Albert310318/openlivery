@@ -2,7 +2,7 @@
 
 > Leer en español: [custom-tools.md](../es/custom-tools.md)
 
-Custom tools let an agent act, not just answer. From the **Tools** tab of the agent editor you can connect two kinds of tools, and the agent decides when to call them during a conversation: **HTTP tools** (an endpoint of your own or any REST API) and **MCP servers** (external services that speak the Model Context Protocol). Tools work on every channel: the playground, the web widget and WhatsApp.
+Custom tools let an agent act, not just answer. From the **Integrations** tab of the agent editor you can connect two kinds of tools, and the agent decides when to call them during a conversation: **HTTP tools** (an endpoint of your own or any REST API) and **MCP servers** (external services that speak the Model Context Protocol). Tools work on every channel: the playground, the web widget and WhatsApp.
 
 ## HTTP tools
 
@@ -25,6 +25,8 @@ An MCP server connects the agent to every tool that server exposes:
 - **Auth headers** — optional, encrypted at rest like HTTP tool headers.
 
 Before you can save a server you must run **Test connection**, which connects, performs the MCP handshake and lists the server's tools. The discovered list is cached on save and reused at chat time, so conversations never wait on discovery; editing the URL, transport or headers re-runs the check. Creating or updating a server whose connection fails is rejected.
+
+Once the tools are listed you choose which ones the agent may call. Every tool is enabled by default; untick the ones the agent should not have, or use **Select none** and enable only what it needs. Tools the server marks as read-only or as modifying data carry a badge so the choice is informed. A narrowed selection stays put when the server later adds tools; a server left at "all" exposes new tools automatically. A tool that disappears from the server is dropped from the selection the next time the list is refreshed.
 
 ## How tool calling works
 

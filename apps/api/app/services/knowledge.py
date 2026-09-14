@@ -15,6 +15,11 @@ from .providers import DEFAULT_PROVIDER, resolve_provider_credentials
 
 MAX_FULL_CONTEXT_CHARS = 45_000
 MAX_SEARCH_CONTEXT_CHARS = 32_000
+# Semantic search returns at most this many chunks, and drops any that scores
+# well below the best match. Similarity scales differ per embedding model, so
+# the cut is relative rather than an absolute threshold.
+MAX_SEMANTIC_CHUNKS = 10
+MIN_RELATIVE_SIMILARITY = 0.75
 
 
 @dataclass
@@ -101,9 +106,11 @@ async def embed_document_chunks(db: Session, agent: Agent, document: KnowledgeDo
     if not pieces:
         return 0
     base_url, api_key = credentials
-    vectors = await embed_texts(base_url, api_key, pieces)
+    vectors = await embed_texts(base_url, api_key, pieces, agent.embedding_model)
     if not vectors:
         return 0
+    # Replace whatever was indexed before (possibly with another model).
+    db.query(KnowledgeChunk).filter(KnowledgeChunk.document_id == document.id).delete(synchronize_session=False)
     db.add_all(
         KnowledgeChunk(
             document_id=document.id,
@@ -111,11 +118,47 @@ async def embed_document_chunks(db: Session, agent: Agent, document: KnowledgeDo
             position=index,
             content=content,
             embedding=vector,
+            embedding_model=agent.embedding_model,
         )
         for index, (content, vector) in enumerate(zip(pieces, vectors))
     )
     db.commit()
     return len(pieces)
+
+
+async def reindex_document(db: Session, agent: Agent, document: KnowledgeDocument) -> int:
+    """Re-embed one document with the agent's current model. Raises RuntimeError
+    when there is no provider key or the provider returned nothing, so the
+    caller can report it. A document with no usable text is a no-op (returns 0)."""
+    if not resolve_provider_credentials(db, agent.agency_id, DEFAULT_PROVIDER):
+        raise RuntimeError("No provider key is configured for embeddings")
+    if document.status != "processed" or not document.extracted_text.strip():
+        return 0
+    count = await embed_document_chunks(db, agent, document)
+    if count == 0:
+        raise RuntimeError("The provider did not return embeddings for the document")
+    return count
+
+
+async def reindex_agent(db: Session, agent: Agent) -> int:
+    """Re-embed every processed document with the agent's current model.
+
+    Returns the number of chunks written. Raises RuntimeError when the agency
+    has no provider key or the provider rejected the embedding calls, so the
+    caller can report it instead of silently leaving documents unindexed.
+    """
+    if not resolve_provider_credentials(db, agent.agency_id, DEFAULT_PROVIDER):
+        raise RuntimeError("No provider key is configured for embeddings")
+    documents = list(db.scalars(select(KnowledgeDocument).where(KnowledgeDocument.agent_id == agent.id)).all())
+    written = 0
+    for document in documents:
+        if document.status != "processed" or not document.extracted_text.strip():
+            continue
+        count = await embed_document_chunks(db, agent, document)
+        if count == 0:
+            raise RuntimeError("The provider did not return embeddings for the documents")
+        written += count
+    return written
 
 
 async def retrieve_knowledge(db: Session, agent: Agent, query: str) -> KnowledgeResult:
@@ -144,15 +187,19 @@ async def _semantic_search(db: Session, agent: Agent, query: str) -> KnowledgeRe
     chunks = list(
         db.scalars(select(KnowledgeChunk).where(KnowledgeChunk.agent_id == agent.id)).all()
     )
-    chunks = [chunk for chunk in chunks if chunk.embedding]
+    # Only vectors from the agent's current model are comparable with the
+    # query's; chunks left over from another model wait for a reindex.
+    chunks = [chunk for chunk in chunks if chunk.embedding and chunk.embedding_model == agent.embedding_model]
     if not chunks:
         return None
     base_url, api_key = credentials
-    query_vector = await embed_query(base_url, api_key, query)
+    query_vector = await embed_query(base_url, api_key, query, agent.embedding_model)
     if not query_vector:
         return None
 
-    ranked = sorted(chunks, key=lambda chunk: cosine_similarity(query_vector, chunk.embedding), reverse=True)
+    scored = sorted(((cosine_similarity(query_vector, chunk.embedding), chunk) for chunk in chunks), key=lambda item: item[0], reverse=True)
+    best = scored[0][0]
+    ranked = [chunk for score, chunk in scored[:MAX_SEMANTIC_CHUNKS] if best <= 0 or score >= best * MIN_RELATIVE_SIMILARITY]
     selected: list[str] = []
     sources: list[dict] = []
     seen_docs: set[str] = set()

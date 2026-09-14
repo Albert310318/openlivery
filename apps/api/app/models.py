@@ -188,6 +188,9 @@ class Agent(Base):
     image_model: Mapped[str] = mapped_column(String(180), default="", server_default="")
     audio_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     audio_model: Mapped[str] = mapped_column(String(180), default="openai/gpt-4o-mini-transcribe", server_default="openai/gpt-4o-mini-transcribe")
+    # Embedding model for this agent's knowledge base. Vectors from different
+    # models are not comparable, so chunks record theirs and a change reindexes.
+    embedding_model: Mapped[str] = mapped_column(String(180), default="openai/text-embedding-3-small", server_default="openai/text-embedding-3-small")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
@@ -228,6 +231,9 @@ class AgentTool(Base):
     transport: Mapped[str] = mapped_column(String(20), default="streamable_http")
     cached_tools: Mapped[list] = mapped_column(JSON, default=list)
     tools_cached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Names of the cached tools the agent may call. None exposes every cached
+    # tool; a list restricts the server to that subset.
+    enabled_tools: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # The full auth headers dict, encrypted at rest; never returned by the API.
     encrypted_headers: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
@@ -354,6 +360,7 @@ class KnowledgeChunk(Base):
     # Embedding vector stored as a JSON array of floats (portable across any
     # Postgres; similarity is computed in Python). Swap to pgvector at scale.
     embedding: Mapped[list] = mapped_column(JSON, default=list)
+    embedding_model: Mapped[str] = mapped_column(String(180), default="openai/text-embedding-3-small", server_default="openai/text-embedding-3-small")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
     document: Mapped[KnowledgeDocument] = relationship(back_populates="chunks")

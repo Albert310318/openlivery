@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..deps import get_current_user
 from ..models import User
-from ..schemas import ModelCatalogOut
+from ..schemas import EmbeddingModelOut, ModelCatalogOut
 from ..services import model_catalog
-from ..services.model_catalog import get_model, list_models
+from ..services.model_catalog import get_model, list_embedding_models, list_models
 
 
 router = APIRouter(prefix="/catalog", tags=["Model catalog"])
@@ -22,6 +22,11 @@ def available_models(user: User = Depends(get_current_user)):
 @router.get("/models", response_model=list[ModelCatalogOut])
 def list_catalog_models(user: User = Depends(get_current_user)):
     return [asdict(model) for model in list_models()]
+
+
+@router.get("/embedding-models", response_model=list[EmbeddingModelOut])
+def list_catalog_embedding_models(user: User = Depends(get_current_user)):
+    return [asdict(model) for model in list_embedding_models()]
 
 
 @router.get("/models/{model_id:path}", response_model=ModelCatalogOut)

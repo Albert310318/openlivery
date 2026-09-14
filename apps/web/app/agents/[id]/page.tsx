@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, AudioLines, Bot, CheckCircle2, FileText, ImageIcon, LoaderCircle, MessageSquareText, Plus, Power, PowerOff, Save, Settings2, Sparkles, Trash2, UploadCloud, Wrench, XCircle } from "lucide-react";
+import { ArrowLeft, AudioLines, Bot, CheckCircle2, FileText, ImageIcon, LoaderCircle, MessageSquareText, Plug, Plus, Power, PowerOff, RefreshCw, Save, Settings2, Sparkles, Trash2, UploadCloud, XCircle } from "lucide-react";
 import { api, messageFrom } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { businessLabel, useIndustries } from "@/lib/industries";
@@ -15,9 +15,9 @@ import { ChatPlayground } from "@/components/chat-playground";
 import { AgentToolsTab } from "@/components/agent-tools/agent-tools-tab";
 import { EscalationRulesEditor } from "@/components/escalation-rules";
 import { Combobox } from "@/components/combobox";
-import { DEFAULT_PROVIDER, DEFAULT_AUDIO_MODEL, DEFAULT_IMAGE_MODEL, modelsFor, modelOptionsFor, estimateTokens, modelContextWindow, AUDIO_MODELS, IMAGE_MODELS } from "@/lib/providers";
+import { DEFAULT_PROVIDER, DEFAULT_AUDIO_MODEL, DEFAULT_EMBEDDING_MODEL, DEFAULT_IMAGE_MODEL, modelsFor, modelOptionsFor, estimateTokens, modelContextWindow, AUDIO_MODELS, EMBEDDING_MODELS, IMAGE_MODELS } from "@/lib/providers";
 import { narrowModels, useAvailableModels } from "@/lib/use-available-models";
-import type { Agent, AgentTool, KnowledgeDocument, QAPair } from "@/types";
+import type { Agent, AgentTool, KnowledgeDocument, QAPair, EmbeddingModelInfo } from "@/types";
 
 type Tab = "basics" | "knowledge" | "tools" | "playground";
 const TABS: Tab[] = ["basics", "knowledge", "tools", "playground"];
@@ -48,6 +48,8 @@ export default function AgentDetailPage() {
   const [tools, setTools] = useState<AgentTool[]>([]);
   const [tab, setTab] = useState<Tab>("basics");
   const [busy, setBusy] = useState(false);
+  const [indexing, setIndexing] = useState(false);
+  const [embeddingModels, setEmbeddingModels] = useState<EmbeddingModelInfo[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
@@ -64,8 +66,47 @@ export default function AgentDetailPage() {
   const contextWindow = modelContextWindow(model);
   const contextPct = Math.min(100, Math.round(((promptTokens ?? 0) / contextWindow) * 100));
   useEffect(() => { load(); }, [id]);
+  useEffect(() => { api<EmbeddingModelInfo[]>("/catalog/embedding-models").then(setEmbeddingModels).catch(() => {}); }, []);
+
+  // Mirrors MAX_FULL_CONTEXT_CHARS in the backend: at or below this the whole
+  // knowledge base is sent in full and embeddings are not used.
+  const FULL_CONTEXT_CHARS = 45_000;
+  const smallBase = documents.reduce((sum, doc) => sum + (doc.status === "processed" ? doc.character_count : 0), 0) <= FULL_CONTEXT_CHARS;
+
+  // Re-embed a single document with the agent's current model (repair one row).
+  async function reindexOne(doc: KnowledgeDocument) {
+    setIndexing(true);
+    try {
+      const updated = await api<KnowledgeDocument>(`/agents/${id}/documents/${doc.id}/reindex`, { method: "POST" });
+      setDocuments((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+      toast.success(t("agents.detail.reindexed", { model: agent?.embedding_model || "" }));
+    } catch (err) { toast.error(messageFrom(err)); } finally { setIndexing(false); }
+  }
+
+  // Re-embed every document with the agent's current model. Also the repair
+  // path for uploads that were indexed without a working provider key.
+  async function reindex(model?: string) {
+    setIndexing(true);
+    try {
+      const docs = await api<KnowledgeDocument[]>(`/agents/${id}/documents/reindex`, { method: "POST" });
+      setDocuments(docs);
+      toast.success(t("agents.detail.reindexed", { model: model || agent?.embedding_model || "" }));
+    } catch (err) { toast.error(messageFrom(err)); } finally { setIndexing(false); }
+  }
+
+  // Vectors from different models are not comparable, so a change reindexes at once.
+  async function changeEmbeddingModel(model: string) {
+    if (!agent || model === agent.embedding_model) return;
+    setIndexing(true);
+    try {
+      const updated = await api<Agent>(`/agents/${id}`, { method: "PATCH", body: JSON.stringify({ embedding_model: model }) });
+      setAgent(updated);
+    } catch (err) { toast.error(messageFrom(err)); setIndexing(false); return; }
+    await reindex(model);
+  }
+
   // Let other areas deep-link straight to a tab.
-  useEffect(() => { const q = new URLSearchParams(window.location.search).get("tab"); if (q === "details") setTab("basics"); else if (q && (TABS as string[]).includes(q)) setTab(q as Tab); }, []);
+  useEffect(() => { const q = new URLSearchParams(window.location.search).get("tab"); if (q === "details") setTab("basics"); else if (q === "integrations") setTab("tools"); else if (q && (TABS as string[]).includes(q)) setTab(q as Tab); }, []);
   // The prompt preview is what the model receives; it changes with every save,
   // so it is fetched fresh each time the tab is opened.
 
@@ -153,7 +194,7 @@ export default function AgentDetailPage() {
         <div className="modal-actions"><button type="button" className="button" onClick={() => setDeleteOpen(false)}>{t("common.cancel")}</button><button type="button" className="button danger" disabled={busy || deleteName.trim() !== agent.name.trim()} onClick={removeAgent}>{busy ? <LoaderCircle className="spin" size={16} /> : <><Trash2 size={15} /> {t("agents.detail.deleteAgent")}</>}</button></div>
       </div>
     </Modal>
-    <nav className="tabs"><button className={tab === "basics" ? "active" : ""} onClick={() => setTab("basics")}><Settings2 size={17} /> {t("agents.detail.tabBasics")}</button><button className={tab === "knowledge" ? "active" : ""} onClick={() => setTab("knowledge")}><FileText size={17} /> {t("agents.detail.tabKnowledge")} <span>{documents.length}</span></button><button className={tab === "tools" ? "active" : ""} onClick={() => setTab("tools")}><Wrench size={17} /> {t("tools.tab")} <span>{tools.length}</span></button><button className={tab === "playground" ? "active" : ""} onClick={() => setTab("playground")}><MessageSquareText size={17} /> {t("agents.detail.tabPlayground")}</button></nav>
+    <nav className="tabs"><button className={tab === "basics" ? "active" : ""} onClick={() => setTab("basics")}><Settings2 size={17} /> {t("agents.detail.tabBasics")}</button><button className={tab === "knowledge" ? "active" : ""} onClick={() => setTab("knowledge")}><FileText size={17} /> {t("agents.detail.tabKnowledge")} <span>{documents.length}</span></button><button className={tab === "tools" ? "active" : ""} onClick={() => setTab("tools")}><Plug size={17} /> {t("tools.tab")} <span>{tools.length}</span></button><button className={tab === "playground" ? "active" : ""} onClick={() => setTab("playground")}><MessageSquareText size={17} /> {t("agents.detail.tabPlayground")}</button></nav>
 
     {tab === "basics" && <form className="settings-form" onSubmit={saveConfig}>
       <section className="settings-section"><div className="settings-copy"><h3>{t("agents.detail.generalHeading")} <AiHint text={t("aiContext.agentName")} /></h3><p>{t("agents.detail.generalCopy")}</p></div><div className="settings-fields"><div className="form-grid"><label>{t("agents.detail.nameLabel")}<input value={name} required onChange={(e) => setName(e.target.value)} /></label><label>{t("agents.detail.clientLabel")}<input value={agent.client.name} readOnly /></label></div><p className="greeting-preview">{t("agents.detail.greetingPreview", { name: name.trim() || agent.name, client: agent.client.name })}</p></div></section>
@@ -205,8 +246,19 @@ export default function AgentDetailPage() {
     {tab === "knowledge" && <div className="knowledge-stack">
       <section className="panel documents-panel"><div className="panel-head"><div><h3>{t("agents.detail.pdfHeading")}</h3><p>{t("agents.detail.pdfCopy")}</p></div></div>
         <button className="dropzone" onClick={() => fileRef.current?.click()} disabled={busy}><span><UploadCloud size={24} /></span><strong>{busy ? t("agents.detail.processing") : t("agents.detail.uploadPdf")}</strong><small>{t("agents.detail.uploadHint")}</small></button><input ref={fileRef} type="file" accept="application/pdf,.pdf" hidden onChange={(e) => upload(e.target.files?.[0])} />
-        <div className="documents-list">{documents.map((doc) => <div className="document-row" key={doc.id}><span className={`document-icon ${doc.status}`}><FileText size={19} /></span><div><strong>{doc.filename}</strong><small>{doc.status === "processed" ? t("agents.detail.charsExtracted", { count: doc.character_count.toLocaleString("es") }) : doc.error_message}</small></div><span className={`document-status ${doc.status}`}>{doc.status === "processed" ? <><CheckCircle2 size={14} /> {t("agents.detail.processed")}</> : <><XCircle size={14} /> {t("agents.detail.error")}</>}</span><button className="icon-button danger-icon" onClick={() => removeDocument(doc)} title={t("agents.detail.delete")}><Trash2 size={16} /></button></div>)}{!documents.length && <div className="inline-empty slim"><FileText size={22} /><div><strong>{t("agents.detail.noDocumentsTitle")}</strong><span>{t("agents.detail.noDocumentsHint")}</span></div></div>}</div>
+        <div className="documents-list">{documents.map((doc) => <div className="document-row" key={doc.id}><span className={`document-icon ${doc.status}`}><FileText size={19} /></span><div><strong>{doc.filename}</strong><small>{doc.status === "processed" ? `${t("agents.detail.charsExtracted", { count: doc.character_count.toLocaleString("es") })} · ${smallBase ? t("agents.detail.sentInFull") : doc.chunk_count && doc.indexed_model === agent.embedding_model ? t("agents.detail.indexedChunks", { count: doc.chunk_count }) : t("agents.detail.notIndexed")}` : doc.error_message}</small></div><span className={`document-status ${doc.status}`}>{doc.status === "processed" ? <><CheckCircle2 size={14} /> {t("agents.detail.processed")}</> : <><XCircle size={14} /> {t("agents.detail.error")}</>}</span>{doc.status === "processed" && !smallBase && <button className="icon-button" onClick={() => reindexOne(doc)} disabled={indexing || busy} title={t("agents.detail.reindex")}><RefreshCw size={15} /></button>}<button className="icon-button danger-icon" onClick={() => removeDocument(doc)} title={t("agents.detail.delete")}><Trash2 size={16} /></button></div>)}{!documents.length && <div className="inline-empty slim"><FileText size={22} /><div><strong>{t("agents.detail.noDocumentsTitle")}</strong><span>{t("agents.detail.noDocumentsHint")}</span></div></div>}</div>
       </section>
+    <section className="panel"><div className="panel-head"><div><h3>{t("agents.detail.embeddingHeading")} <AiHint text={t("aiContext.embedding")} /></h3><p>{t("agents.detail.embeddingCopy")}</p></div><button type="button" className="button secondary" onClick={() => reindex()} disabled={indexing || busy || !documents.some((doc) => doc.status === "processed")}>{indexing ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />} {indexing ? t("agents.detail.reindexing") : t("agents.detail.reindex")}</button></div>
+      <label className="embedding-picker">{t("agents.detail.embeddingModelLabel")}
+        <select value={agent.embedding_model || DEFAULT_EMBEDDING_MODEL} disabled={indexing} onChange={(e) => changeEmbeddingModel(e.target.value)}>
+          {(embeddingModels.length ? embeddingModels : narrowModels(EMBEDDING_MODELS, available?.embedding).map((id) => ({ id, label: id, input_price_per_1k: 0 } as EmbeddingModelInfo)))
+            .filter((m) => !available?.embedding?.length || available.embedding.includes(m.id) || m.id === agent.embedding_model)
+            .map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+          {!embeddingModels.some((m) => m.id === agent.embedding_model) && !(EMBEDDING_MODELS as readonly string[]).includes(agent.embedding_model) && <option value={agent.embedding_model}>{agent.embedding_model}</option>}
+        </select>
+        <span className="field-help">{t("agents.detail.embeddingHint")}</span>
+      </label>
+    </section>
     <section className="panel"><div className="panel-head"><div><h3>{t("agents.detail.qaHeading")}</h3><p>{t("agents.detail.qaCopy")}</p></div></div>
       <form className="qa-form" onSubmit={addQA}><input name="question" required placeholder={t("agents.detail.qaQuestionPlaceholder")} /><textarea name="answer" rows={2} required placeholder={t("agents.detail.qaAnswerPlaceholder")} /><button className="button secondary align-start" disabled={busy}><Plus size={15} /> {t("agents.detail.qaAdd")}</button></form>
       <div className="qa-list">{qaPairs.map((pair) => <div className="qa-item" key={pair.id}><div><strong>{pair.question}</strong><small>{pair.answer}</small></div><button type="button" className="icon-button danger-icon" onClick={() => removeQA(pair)} title={t("agents.detail.delete")}><Trash2 size={16} /></button></div>)}{!qaPairs.length && <div className="inline-empty slim"><MessageSquareText size={22} /><div><strong>{t("agents.detail.qaEmpty")}</strong></div></div>}</div>

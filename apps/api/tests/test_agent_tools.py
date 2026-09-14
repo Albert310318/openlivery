@@ -86,7 +86,7 @@ def test_mcp_test_connection_and_create(authenticated_client: TestClient, monkey
     monkeypatch.setattr(agent_tools_router, "discover_mcp_tools", AsyncMock(return_value=discovered))
     tested = client.post(f"/api/agents/{agent_id}/tools/test-mcp", json={"url": "https://mcp.example.test/mcp"})
     assert tested.status_code == 200
-    assert tested.json() == {"ok": True, "tools": [{"name": "lookup", "description": "Find things"}]}
+    assert tested.json() == {"ok": True, "tools": [{"name": "lookup", "description": "Find things", "read_only": False, "destructive": False}]}
 
     created = client.post(
         f"/api/agents/{agent_id}/tools",
@@ -104,6 +104,62 @@ def test_mcp_test_connection_and_create(authenticated_client: TestClient, monkey
     )
     assert failed.status_code == 502
     assert [item["name"] for item in client.get(f"/api/agents/{agent_id}/tools").json()] == ["orders"]
+
+
+def test_mcp_enabled_tools_selection(authenticated_client: TestClient, monkeypatch):
+    client = authenticated_client
+    agent_id = _setup_agent(client)
+    discovered = [
+        {"name": "lookup", "description": "Find things", "input_schema": {"type": "object", "properties": {}}, "read_only": True, "destructive": False},
+        {"name": "purge", "description": "Delete things", "input_schema": {"type": "object", "properties": {}}, "read_only": False, "destructive": True},
+    ]
+    monkeypatch.setattr(agent_tools_router, "discover_mcp_tools", AsyncMock(return_value=discovered))
+
+    tested = client.post(f"/api/agents/{agent_id}/tools/test-mcp", json={"url": "https://mcp.example.test/mcp"})
+    assert [(t["name"], t["read_only"], t["destructive"]) for t in tested.json()["tools"]] == [("lookup", True, False), ("purge", False, True)]
+
+    # Unknown and duplicate names are dropped from the selection at save time.
+    created = client.post(
+        f"/api/agents/{agent_id}/tools",
+        json={"type": "mcp", "name": "orders", "url": "https://mcp.example.test/mcp", "enabled_tools": ["purge", "ghost", "purge"]},
+    )
+    assert created.status_code == 201, created.text
+    tool_id = created.json()["id"]
+    assert created.json()["enabled_tools"] == ["purge"]
+
+    # Omitting the field keeps the selection; null exposes every tool again.
+    kept = client.patch(f"/api/agents/{agent_id}/tools/{tool_id}", json={"description": "Orders"})
+    assert kept.json()["enabled_tools"] == ["purge"]
+    cleared = client.patch(f"/api/agents/{agent_id}/tools/{tool_id}", json={"enabled_tools": None})
+    assert cleared.json()["enabled_tools"] is None
+
+    # A re-discovery that no longer lists a selected tool prunes it.
+    client.patch(f"/api/agents/{agent_id}/tools/{tool_id}", json={"enabled_tools": ["lookup", "purge"]})
+    monkeypatch.setattr(agent_tools_router, "discover_mcp_tools", AsyncMock(return_value=discovered[:1]))
+    moved = client.patch(f"/api/agents/{agent_id}/tools/{tool_id}", json={"url": "https://mcp2.example.test/mcp"})
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["enabled_tools"] == ["lookup"]
+
+    # HTTP tools never carry a selection.
+    http_tool = client.post(
+        f"/api/agents/{agent_id}/tools",
+        json={"type": "http", "name": "ping", "url": "https://api.example.test/ping"},
+    ).json()
+    patched = client.patch(f"/api/agents/{agent_id}/tools/{http_tool['id']}", json={"enabled_tools": ["x"]})
+    assert patched.status_code == 200 and patched.json()["enabled_tools"] is None
+
+
+def test_specs_honour_enabled_tools():
+    cached = [
+        {"name": "lookup", "description": "Find", "input_schema": {"type": "object", "properties": {}}},
+        {"name": "purge", "description": "Delete", "input_schema": {"type": "object", "properties": {}}},
+    ]
+    row = AgentTool(type="mcp", name="orders", url="https://mcp.example.test/mcp", cached_tools=cached, enabled_tools=None)
+    assert [spec.name for spec in build_tool_specs([row])] == ["orders__lookup", "orders__purge"]
+    row.enabled_tools = ["purge"]
+    assert [spec.name for spec in build_tool_specs([row])] == ["orders__purge"]
+    row.enabled_tools = []
+    assert build_tool_specs([row]) == []
 
 
 def test_tool_urls_are_trimmed():

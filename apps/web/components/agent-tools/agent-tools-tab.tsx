@@ -5,6 +5,7 @@ import { Pencil, Plus, Server, Trash2, Wrench, Zap } from "lucide-react";
 import { api, messageFrom } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useToast } from "@/components/toast";
+import { ConfirmModal } from "@/components/confirm-modal";
 import type { AgentTool } from "@/types";
 import { HttpToolModal } from "./http-tool-modal";
 import { McpServerModal } from "./mcp-server-modal";
@@ -19,6 +20,7 @@ export function AgentToolsTab({ agentId, tools, onToolsChange }: {
   // null = closed, "new" = create, otherwise the tool being edited.
   const [httpModal, setHttpModal] = useState<AgentTool | "new" | null>(null);
   const [mcpModal, setMcpModal] = useState<AgentTool | "new" | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<AgentTool | null>(null);
 
   function saved(tool: AgentTool) {
     onToolsChange(
@@ -35,12 +37,10 @@ export function AgentToolsTab({ agentId, tools, onToolsChange }: {
     } catch (err) { toast.error(messageFrom(err)); }
   }
 
+  // Errors stay inside the confirm modal so the user can read them and retry.
   async function remove(tool: AgentTool) {
-    if (!confirm(t("tools.confirmDelete", { name: tool.name }))) return;
-    try {
-      await api(`/agents/${agentId}/tools/${tool.id}`, { method: "DELETE" });
-      onToolsChange(tools.filter((item) => item.id !== tool.id));
-    } catch (err) { toast.error(messageFrom(err)); }
+    await api(`/agents/${agentId}/tools/${tool.id}`, { method: "DELETE" });
+    onToolsChange(tools.filter((item) => item.id !== tool.id));
   }
 
   return (
@@ -58,14 +58,14 @@ export function AgentToolsTab({ agentId, tools, onToolsChange }: {
             <span className={`document-icon ${tool.enabled ? "" : "error"}`}>{tool.type === "http" ? <Zap size={18} /> : <Server size={18} />}</span>
             <div>
               <strong>{tool.name} <span className="pill">{tool.type === "http" ? `${t("tools.badgeHttp")} · ${tool.http_method}` : t("tools.badgeMcp")}</span></strong>
-              <small>{tool.type === "mcp" ? `${tool.url} · ${t("tools.mcpToolCount", { count: tool.cached_tools.length })}` : tool.description || tool.url}</small>
+              <small>{tool.type === "mcp" ? `${tool.url} · ${tool.enabled_tools ? t("tools.mcpToolsEnabled", { enabled: tool.enabled_tools.length, count: tool.cached_tools.length }) : t("tools.mcpToolCount", { count: tool.cached_tools.length })}` : tool.description || tool.url}</small>
             </div>
             <label className="switch-row compact tool-switch" title={t("tools.enabled")}>
               <input type="checkbox" checked={tool.enabled} onChange={() => toggle(tool)} />
             </label>
             <div className="tools-row-actions">
               <button className="icon-button" onClick={() => (tool.type === "http" ? setHttpModal(tool) : setMcpModal(tool))} title={t("tools.edit")}><Pencil size={15} /></button>
-              <button className="icon-button danger-icon" onClick={() => remove(tool)} title={t("tools.delete")}><Trash2 size={15} /></button>
+              <button className="icon-button danger-icon" onClick={() => setConfirmDelete(tool)} title={t("tools.delete")}><Trash2 size={15} /></button>
             </div>
           </div>
         ))}
@@ -78,6 +78,14 @@ export function AgentToolsTab({ agentId, tools, onToolsChange }: {
       </div>
       <HttpToolModal agentId={agentId} tool={httpModal === "new" ? null : httpModal} open={httpModal !== null} onClose={() => setHttpModal(null)} onSaved={saved} />
       <McpServerModal agentId={agentId} tool={mcpModal === "new" ? null : mcpModal} open={mcpModal !== null} onClose={() => setMcpModal(null)} onSaved={saved} />
+      {confirmDelete && <ConfirmModal
+        title={t("tools.confirmDelete", { name: confirmDelete.name })}
+        confirmLabel={t("tools.delete")}
+        cancelLabel={t("tools.form.cancel")}
+        confirmIcon={<Trash2 size={15} />}
+        onConfirm={() => remove(confirmDelete)}
+        onClose={() => setConfirmDelete(null)}
+      />}
     </section>
   );
 }

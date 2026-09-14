@@ -30,6 +30,7 @@ const en = {
     agentName: "Sent to the AI. The agent introduces itself with this name.",
     agentBusiness: "Everything in this section is sent to the AI with every message.",
     agentJob: "Everything in this section is sent to the AI with every message.",
+    embedding: "The agent reads small knowledge bases in full. Once they grow past about 45,000 characters it searches instead, and this model turns the text into the vectors that search compares.",
   },
   chat: {
     attachFile: "Attach a file",
@@ -172,6 +173,7 @@ const es: typeof en = {
     agentName: "Se envía a la IA. El agente se presenta con este nombre.",
     agentBusiness: "Todo lo de esta sección se envía a la IA en cada mensaje.",
     agentJob: "Todo lo de esta sección se envía a la IA en cada mensaje.",
+    embedding: "El agente lee completas las bases pequeñas. Cuando pasan de unos 45.000 caracteres busca en su lugar, y este modelo convierte el texto en los vectores que esa búsqueda compara.",
   },
   chat: {
     attachFile: "Adjuntar un archivo",

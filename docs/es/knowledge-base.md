@@ -13,14 +13,14 @@ Consulta [Agentes](agents.md) para ver dónde se gestionan en el editor del agen
 
 ## Cómo se procesan los PDFs
 
-Cuando subes un PDF, su texto se extrae de inmediato con `pypdf` y se guarda en el documento. Si no se puede extraer texto (por ejemplo, un PDF escaneado que solo contiene imágenes), el documento se marca como `error` y no se utiliza. El texto extraído se divide luego en fragmentos del tamaño de un párrafo. Cuando la agencia tiene una clave de OpenRouter, cada fragmento se convierte en un vector con `openai/text-embedding-3-small` que se guarda junto a él; el embedding es de mejor esfuerzo, así que si no está disponible el agente sigue funcionando mediante búsqueda por palabras clave.
+Cuando subes un PDF, su texto se extrae de inmediato con `pypdf` y se guarda en el documento. Si no se puede extraer texto (por ejemplo, un PDF escaneado que solo contiene imágenes), el documento se marca como `error` y no se utiliza. El texto extraído se divide luego en fragmentos del tamaño de un párrafo. Cuando la agencia tiene una clave de OpenRouter, cada fragmento se convierte en un vector con el **modelo de embeddings** del agente (`openai/text-embedding-3-small` por defecto, elegido en la pestaña Knowledge del catálogo de embeddings de OpenRouter) que se guarda junto a él, marcado con el modelo que lo produjo; el embedding es de mejor esfuerzo, así que si no está disponible el agente sigue funcionando mediante búsqueda por palabras clave. Los vectores de modelos distintos no son comparables, por eso cambiar el modelo reindexa todos los documentos del agente, y **Reindexar documentos** repara las subidas que quedaron sin índice por una clave que fallaba.
 
 ## Cómo funciona la recuperación
 
 En cada mensaje entrante, OpenLivery decide cuánto texto de documentos incluir:
 
 - **Las bases de conocimiento pequeñas se envían completas.** Cuando el texto extraído combinado de todos los documentos procesados es igual o menor a **45.000 caracteres**, cada documento se incluye textualmente, sin paso de búsqueda.
-- **Las bases de conocimiento más grandes se recuperan.** Por encima de ese umbral, OpenLivery ejecuta una búsqueda semántica: convierte la consulta del usuario en un vector y ordena los fragmentos almacenados por similitud de coseno, llenando el contexto hasta un presupuesto de búsqueda. Si los embeddings no están disponibles, recurre al ranking por palabras clave sobre los fragmentos.
+- **Las bases de conocimiento más grandes se recuperan.** Por encima de ese umbral, OpenLivery ejecuta una búsqueda semántica: convierte la consulta del usuario en un vector con el modelo del agente y ordena por similitud de coseno los fragmentos indexados con ese mismo modelo, se queda con los diez mejores y descarta los que puntúan muy por debajo del primero, dentro de un presupuesto de búsqueda. Si los embeddings no están disponibles, recurre al ranking por palabras clave sobre los fragmentos.
 
 Los embeddings se guardan como un simple **arreglo JSON de números** y la similitud se calcula en Python, por lo que **no se requiere ninguna extensión de base de datos** — la base de conocimiento es portable en cualquier PostgreSQL. Consulta [Proveedores de IA](ai-providers.md) para configurar la conexión usada para los embeddings.
 

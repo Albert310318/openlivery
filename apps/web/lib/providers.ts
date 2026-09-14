@@ -62,6 +62,20 @@ export const DEFAULT_PROVIDER: ProviderId = "openrouter";
 export const AUDIO_MODELS = ["openai/gpt-4o-mini-transcribe", "openai/gpt-4o-transcribe", "openai/gpt-transcribe"] as const;
 export const DEFAULT_AUDIO_MODEL = AUDIO_MODELS[0];
 
+// Embedding models for the knowledge base (mirrors the API catalog, used while
+// it loads). Vectors from different models are not comparable, so changing an
+// agent's model reindexes its documents.
+export const EMBEDDING_MODELS = [
+  "openai/text-embedding-3-small",
+  "openai/text-embedding-3-large",
+  "google/gemini-embedding-2",
+  "qwen/qwen3-embedding-8b",
+  "voyageai/voyage-4",
+  "voyageai/voyage-4-lite",
+  "mistralai/mistral-embed-2312",
+] as const;
+export const DEFAULT_EMBEDDING_MODEL = EMBEDDING_MODELS[0];
+
 // Vision models for the image-recognition capability: any chat model that
 // accepts images. DeepSeek is text-only, so it is left out.
 export const IMAGE_MODELS = [

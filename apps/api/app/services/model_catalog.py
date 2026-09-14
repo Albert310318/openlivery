@@ -38,6 +38,43 @@ CHARS_PER_TOKEN = 4
 # Transcription model an agent gets unless it picks another one.
 DEFAULT_AUDIO_MODEL = "openai/gpt-4o-mini-transcribe"
 
+# Embedding model an agent's knowledge base uses unless it picks another one.
+DEFAULT_EMBEDDING_MODEL = "openai/text-embedding-3-small"
+
+
+@dataclass(frozen=True)
+class EmbeddingModelInfo:
+    id: str
+    provider: str
+    label: str
+    # Longest input the model embeds, in tokens. Chunks are ~1,800 characters,
+    # so anything under 2k tokens is left out of the catalog.
+    context_window: int
+    # List price per 1,000 input tokens, in USD (embeddings have no output).
+    input_price_per_1k: float
+    note: str = ""
+
+
+# Curated from OpenRouter's embeddings catalog (GET /api/v1/embeddings/models).
+# Any other slug that endpoint serves still works when set through the API.
+EMBEDDING_MODELS: tuple[EmbeddingModelInfo, ...] = (
+    EmbeddingModelInfo(DEFAULT_EMBEDDING_MODEL, "openai", "OpenAI text-embedding-3 small", 8_192, 0.00002,
+                       "Default. Cheap and solid for most knowledge bases."),
+    EmbeddingModelInfo("openai/text-embedding-3-large", "openai", "OpenAI text-embedding-3 large", 8_192, 0.00013,
+                       "Higher accuracy at six times the price."),
+    EmbeddingModelInfo("google/gemini-embedding-2", "google", "Gemini Embedding 2", 8_192, 0.0002,
+                       "Google's current embedding model, strong on multilingual text."),
+    EmbeddingModelInfo("qwen/qwen3-embedding-8b", "qwen", "Qwen3 Embedding 8B", 32_768, 0.00001,
+                       "Open model with a long input window, very cheap."),
+    EmbeddingModelInfo("voyageai/voyage-4", "voyageai", "Voyage 4", 32_000, 0.00006,
+                       "Retrieval-focused model with a long input window."),
+    EmbeddingModelInfo("voyageai/voyage-4-lite", "voyageai", "Voyage 4 Lite", 32_000, 0.00002,
+                       "Lighter Voyage model at the default's price."),
+    EmbeddingModelInfo("mistralai/mistral-embed-2312", "mistralai", "Mistral Embed", 8_192, 0.0001,
+                       "Mistral's embedding model."),
+)
+_EMBEDDING_BY_ID: dict[str, EmbeddingModelInfo] = {model.id: model for model in EMBEDDING_MODELS}
+
 
 _MODELS: tuple[ModelInfo, ...] = (
     # OpenAI
@@ -119,6 +156,14 @@ def get_model(model_id: str) -> ModelInfo | None:
     return _BY_ID.get(model_id)
 
 
+def list_embedding_models() -> list[EmbeddingModelInfo]:
+    return list(EMBEDDING_MODELS)
+
+
+def get_embedding_model(model_id: str) -> EmbeddingModelInfo | None:
+    return _EMBEDDING_BY_ID.get(model_id)
+
+
 def estimate_tokens(text: str) -> int:
     """Quick token estimate (~4 characters per token)."""
     return (len(text) + CHARS_PER_TOKEN - 1) // CHARS_PER_TOKEN
@@ -139,4 +184,9 @@ def available_models() -> dict:
     (for example to the models its managed credentials can actually serve),
     which is why the frontend asks instead of trusting its static lists.
     """
-    return {"chat": {"openrouter": [model.id for model in _MODELS]}, "image": list(IMAGE_MODELS), "audio": list(AUDIO_MODELS)}
+    return {
+        "chat": {"openrouter": [model.id for model in _MODELS]},
+        "image": list(IMAGE_MODELS),
+        "audio": list(AUDIO_MODELS),
+        "embedding": [model.id for model in EMBEDDING_MODELS],
+    }

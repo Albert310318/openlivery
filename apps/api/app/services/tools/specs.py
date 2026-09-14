@@ -64,8 +64,11 @@ def build_tool_specs(tools: list[AgentTool]) -> list[ToolSpec]:
                 description = f"{description}\n\nWhen to use: {tool.prompt_instructions}"
             specs.append(ToolSpec(tool.name, description, _http_input_schema(tool), tool))
             continue
+        allowed = set(tool.enabled_tools) if tool.enabled_tools is not None else None
         for entry in tool.cached_tools or []:
             mcp_name = entry.get("name") or ""
+            if allowed is not None and mcp_name not in allowed:
+                continue
             composite = f"{tool.name}__{mcp_name}"
             if not PROVIDER_NAME_RE.match(composite):
                 continue

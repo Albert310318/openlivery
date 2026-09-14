@@ -13,7 +13,7 @@ from ..database import get_db
 from ..deps import get_current_user
 from ..models import Agent, AgentQA, AgentTool, Client, EscalationRule, KnowledgeChunk, KnowledgeDocument, PortalUser, Team, User, WhatsAppChannel, WhatsAppCloudChannel, WidgetChannel, now_utc
 from ..schemas import AgentCreate, AgentOut, AgentPromptOut, AgentUpdate, DocumentOut, EscalationConfigIn, EscalationConfigOut, QAPairCreate, QAPairOut, check_reply_delay
-from ..services.knowledge import build_system_prompt, embed_document_chunks
+from ..services.knowledge import build_system_prompt, embed_document_chunks, reindex_agent, reindex_document
 
 
 router = APIRouter(prefix="/agents", tags=["Agents"])
@@ -130,6 +130,7 @@ def get_prompt(agent_id: uuid.UUID, db: Session = Depends(get_db), user: User = 
 
 
 def _document_out(doc: KnowledgeDocument) -> dict:
+    chunks = doc.chunks or []
     return {
         "id": doc.id,
         "filename": doc.filename,
@@ -137,7 +138,25 @@ def _document_out(doc: KnowledgeDocument) -> dict:
         "error_message": doc.error_message,
         "created_at": doc.created_at,
         "character_count": len(doc.extracted_text or ""),
+        "indexed_model": chunks[0].embedding_model if chunks else None,
+        "chunk_count": len(chunks),
     }
+
+
+@router.post("/{agent_id}/documents/reindex", response_model=list[DocumentOut])
+async def reindex_documents(agent_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Re-embed every processed document with the agent's current embedding
+    model. Needed after changing the model, or when an upload was indexed
+    without a working provider key."""
+    agent = _agent(db, user, agent_id)
+    try:
+        await reindex_agent(db, agent)
+    except RuntimeError as exc:
+        db.rollback()
+        raise HTTPException(status_code=502, detail=f"Could not index the documents: {exc}.") from exc
+    db.expire_all()
+    docs = db.scalars(select(KnowledgeDocument).where(KnowledgeDocument.agent_id == agent.id).order_by(KnowledgeDocument.created_at.desc())).all()
+    return [_document_out(doc) for doc in docs]
 
 
 @router.get("/{agent_id}/documents", response_model=list[DocumentOut])
@@ -187,6 +206,26 @@ async def upload_document(
             await embed_document_chunks(db, agent, document)
         except Exception:
             db.rollback()
+    return _document_out(document)
+
+
+@router.post("/{agent_id}/documents/{document_id}/reindex", response_model=DocumentOut)
+async def reindex_one_document(
+    agent_id: uuid.UUID, document_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
+    """Re-embed a single document with the agent's current embedding model."""
+    agent = _agent(db, user, agent_id)
+    document = db.scalar(
+        select(KnowledgeDocument).where(KnowledgeDocument.id == document_id, KnowledgeDocument.agent_id == agent.id)
+    )
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    try:
+        await reindex_document(db, agent, document)
+    except RuntimeError as exc:
+        db.rollback()
+        raise HTTPException(status_code=502, detail=f"Could not index the document: {exc}.") from exc
+    db.refresh(document)
     return _document_out(document)
 
 

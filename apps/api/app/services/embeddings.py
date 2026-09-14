@@ -10,17 +10,17 @@ import math
 import httpx
 
 from .ai import auth_headers
+from .model_catalog import DEFAULT_EMBEDDING_MODEL
+
+__all__ = ["DEFAULT_EMBEDDING_MODEL", "embed_texts", "embed_query", "cosine_similarity"]
 
 
-DEFAULT_EMBEDDING_MODEL = "openai/text-embedding-3-small"
-
-
-async def embed_texts(base_url: str, api_key: str, texts: list[str]) -> list[list[float]] | None:
+async def embed_texts(base_url: str, api_key: str, texts: list[str], model: str = DEFAULT_EMBEDDING_MODEL) -> list[list[float]] | None:
     if not texts:
         return []
     url = f"{base_url.rstrip('/')}/embeddings"
     headers = auth_headers(api_key)
-    payload = {"model": DEFAULT_EMBEDDING_MODEL, "input": texts}
+    payload = {"model": model or DEFAULT_EMBEDDING_MODEL, "input": texts}
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(url, headers=headers, json=payload)
@@ -38,8 +38,8 @@ async def embed_texts(base_url: str, api_key: str, texts: list[str]) -> list[lis
         return None
 
 
-async def embed_query(base_url: str, api_key: str, query: str) -> list[float] | None:
-    result = await embed_texts(base_url, api_key, [query])
+async def embed_query(base_url: str, api_key: str, query: str, model: str = DEFAULT_EMBEDDING_MODEL) -> list[float] | None:
+    result = await embed_texts(base_url, api_key, [query], model)
     return result[0] if result else None
 
 

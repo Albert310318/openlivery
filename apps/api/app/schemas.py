@@ -4,7 +4,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
-from .services.model_catalog import DEFAULT_AUDIO_MODEL
+from .services.model_catalog import DEFAULT_AUDIO_MODEL, DEFAULT_EMBEDDING_MODEL
+
+# OpenRouter slug: "vendor/model", optionally with a ":variant" suffix.
+MODEL_SLUG_PATTERN = r"^[a-z0-9-]+/[A-Za-z0-9._-]+(?::[a-z0-9-]+)?$"
 
 
 class ORMModel(BaseModel):
@@ -223,6 +226,7 @@ class AgentBase(BaseModel):
     image_model: str = Field(default="", max_length=180)
     audio_enabled: bool = True
     audio_model: str = Field(default=DEFAULT_AUDIO_MODEL, max_length=180)
+    embedding_model: str = Field(default=DEFAULT_EMBEDDING_MODEL, max_length=180, pattern=MODEL_SLUG_PATTERN)
     is_active: bool = True
 
     @model_validator(mode="after")
@@ -259,6 +263,7 @@ class AgentUpdate(BaseModel):
     image_model: str | None = Field(default=None, max_length=180)
     audio_enabled: bool | None = None
     audio_model: str | None = Field(default=None, max_length=180)
+    embedding_model: str | None = Field(default=None, max_length=180, pattern=MODEL_SLUG_PATTERN)
     is_active: bool | None = None
 
 
@@ -287,6 +292,7 @@ class AgentOut(ORMModel):
     image_model: str
     audio_enabled: bool
     audio_model: str
+    embedding_model: str
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -332,6 +338,18 @@ class DocumentOut(ORMModel):
     error_message: str | None
     created_at: datetime
     character_count: int = 0
+    # Embedding model of the stored chunks, or None when nothing is indexed.
+    indexed_model: str | None = None
+    chunk_count: int = 0
+
+
+class EmbeddingModelOut(BaseModel):
+    id: str
+    provider: str
+    label: str
+    context_window: int
+    input_price_per_1k: float
+    note: str = ""
 
 
 class ConversationCreate(BaseModel):

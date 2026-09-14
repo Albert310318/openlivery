@@ -47,6 +47,20 @@ def _out(tool: AgentTool) -> AgentToolOut:
     return data
 
 
+def _prune_selection(selection: list[str] | None, cached: list[dict]) -> list[str] | None:
+    """Keep only selected names the server actually exposes. None means all."""
+    if selection is None:
+        return None
+    known = {entry.get("name") for entry in cached}
+    seen: set[str] = set()
+    kept = []
+    for name in selection:
+        if name in known and name not in seen:
+            kept.append(name)
+            seen.add(name)
+    return kept
+
+
 async def _discover_or_502(url: str, transport: str, headers: dict[str, str] | None) -> list[dict]:
     try:
         return await discover_mcp_tools(url, transport, headers)
@@ -74,12 +88,13 @@ async def create_tool(
     _agent(db, user, agent_id)
     _check_name_free(db, agent_id, payload.name)
     headers = payload.headers
-    tool = AgentTool(agent_id=agent_id, **payload.model_dump(exclude={"headers"}))
+    tool = AgentTool(agent_id=agent_id, **payload.model_dump(exclude={"headers", "enabled_tools"}))
     if headers:
         tool.encrypted_headers = encrypt_secret(json.dumps(headers))
     if payload.type == "mcp":
         tool.cached_tools = await _discover_or_502(payload.url, payload.transport, headers)
         tool.tools_cached_at = now_utc()
+        tool.enabled_tools = _prune_selection(payload.enabled_tools, tool.cached_tools)
     db.add(tool)
     db.commit()
     db.refresh(tool)
@@ -97,6 +112,10 @@ async def update_tool(
     tool = _tool(db, user, agent_id, tool_id)
     updates = payload.model_dump(exclude_unset=True)
     headers = updates.pop("headers", None)
+    # The ellipsis sentinel tells "omitted" from "null"; HTTP rows ignore it.
+    selection = updates.pop("enabled_tools", ...)
+    if tool.type != "mcp":
+        selection = ...
     if "name" in updates:
         _check_name_free(db, agent_id, updates["name"], exclude_id=tool.id)
     if "body_params" in updates and updates["body_params"] and updates.get("http_method", tool.http_method) in ("GET", "DELETE"):
@@ -108,6 +127,9 @@ async def update_tool(
     if tool.type == "mcp" and ({"url", "transport"} & updates.keys() or headers is not None):
         tool.cached_tools = await _discover_or_502(tool.url, tool.transport, _stored_headers(tool))
         tool.tools_cached_at = now_utc()
+    if tool.type == "mcp":
+        # A re-discovery can drop tools the selection still names; prune either way.
+        tool.enabled_tools = _prune_selection(tool.enabled_tools if selection is ... else selection, tool.cached_tools)
     db.commit()
     db.refresh(tool)
     return _out(tool)
@@ -136,7 +158,18 @@ async def test_mcp(
     if not url:
         raise HTTPException(status_code=422, detail="A server URL is required")
     tools = await _discover_or_502(url, transport, headers)
-    return McpTestOut(ok=True, tools=[{"name": t["name"], "description": t["description"]} for t in tools])
+    return McpTestOut(
+        ok=True,
+        tools=[
+            {
+                "name": t["name"],
+                "description": t["description"],
+                "read_only": bool(t.get("read_only")),
+                "destructive": bool(t.get("destructive")),
+            }
+            for t in tools
+        ],
+    )
 
 
 def _stored_headers(tool: AgentTool) -> dict[str, str] | None:

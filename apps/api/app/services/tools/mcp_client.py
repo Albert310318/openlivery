@@ -50,6 +50,11 @@ async def discover_mcp_tools(url: str, transport: str, headers: dict[str, str] |
                     "name": tool.name,
                     "description": tool.description or "",
                     "input_schema": tool.inputSchema or {"type": "object", "properties": {}},
+                    # Only what the server states explicitly: the UI badges a
+                    # tool as read-only or destructive from these hints.
+                    "read_only": getattr(tool.annotations, "readOnlyHint", None) is True,
+                    "destructive": getattr(tool.annotations, "destructiveHint", None) is True
+                    and getattr(tool.annotations, "readOnlyHint", None) is not True,
                 }
                 for tool in result.tools
             ]

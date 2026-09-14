@@ -2,7 +2,7 @@
 
 > Read in English: [custom-tools.md](../en/custom-tools.md)
 
-Las herramientas personalizadas permiten que un agente actúe, no solo responda. Desde la pestaña **Herramientas** del editor del agente puedes conectar dos tipos de herramientas, y el agente decide cuándo llamarlas durante una conversación: **herramientas HTTP** (un endpoint propio o cualquier API REST) y **servidores MCP** (servicios externos que hablan el Model Context Protocol). Las herramientas funcionan en todos los canales: el playground, el widget web y WhatsApp.
+Las herramientas personalizadas permiten que un agente actúe, no solo responda. Desde la pestaña **Integraciones** del editor del agente puedes conectar dos tipos de herramientas, y el agente decide cuándo llamarlas durante una conversación: **herramientas HTTP** (un endpoint propio o cualquier API REST) y **servidores MCP** (servicios externos que hablan el Model Context Protocol). Las herramientas funcionan en todos los canales: el playground, el widget web y WhatsApp.
 
 ## Herramientas HTTP
 
@@ -25,6 +25,8 @@ Un servidor MCP conecta al agente con todas las herramientas que ese servidor ex
 - **Headers de autenticación** — opcionales, cifrados igual que en las herramientas HTTP.
 
 Antes de guardar un servidor debes ejecutar **Probar conexión**, que conecta, realiza el handshake MCP y lista las herramientas del servidor. La lista descubierta se guarda en caché y se reutiliza durante el chat, así las conversaciones nunca esperan por el descubrimiento; editar la URL, el transporte o los headers repite la comprobación. Crear o actualizar un servidor cuya conexión falla se rechaza.
+
+Con la lista a la vista eliges qué herramientas puede llamar el agente. Todas vienen activas por defecto; desmarca las que no deba tener, o usa **Ninguna** y activa solo lo que necesite. Las que el servidor marca como de solo lectura o como que modifican datos llevan una etiqueta para decidir con criterio. Una selección recortada se mantiene aunque el servidor añada herramientas después; un servidor dejado en "todas" expone las nuevas automáticamente. Una herramienta que desaparece del servidor se quita de la selección en la siguiente actualización de la lista.
 
 ## Cómo funciona el tool calling
 

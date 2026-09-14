@@ -11,6 +11,7 @@ export type AvailableModels = {
   chat: Record<string, string[]>;
   image: string[];
   audio: string[];
+  embedding?: string[];
 };
 
 let cached: AvailableModels | null = null;

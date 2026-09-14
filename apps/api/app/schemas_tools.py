@@ -69,6 +69,8 @@ class McpToolIn(BaseModel):
     transport: Literal["sse", "streamable_http"] = "streamable_http"
     headers: dict[str, str] | None = None
     enabled: bool = True
+    # Subset of the server's tools to expose; None means all of them.
+    enabled_tools: list[str] | None = Field(default=None, max_length=500)
 
     @field_validator("url")
     @classmethod
@@ -94,6 +96,8 @@ class HttpToolUpdate(BaseModel):
     timeout_seconds: int | None = Field(default=None, ge=1, le=120)
     transport: Literal["sse", "streamable_http"] | None = None
     enabled: bool | None = None
+    # MCP only. Omitted keeps the stored selection; null exposes every tool.
+    enabled_tools: list[str] | None = Field(default=None, max_length=500)
 
     @field_validator("url")
     @classmethod
@@ -119,6 +123,7 @@ class AgentToolOut(BaseModel):
     transport: str
     cached_tools: list[dict] = []
     tools_cached_at: datetime | None = None
+    enabled_tools: list[str] | None = None
     has_headers: bool = False
     created_at: datetime
     updated_at: datetime
@@ -139,4 +144,5 @@ class McpTestIn(BaseModel):
 
 class McpTestOut(BaseModel):
     ok: bool
+    # name, description, read_only and destructive per discovered tool.
     tools: list[dict]
