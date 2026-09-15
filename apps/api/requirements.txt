@@ -13,4 +13,9 @@ httpx==0.28.1
 mcp==1.28.1
 dnspython==2.7.0
 email-validator==2.2.0
+# The slim base image ships only a partial system zoneinfo database, so
+# ZoneInfo() raises for valid IANA link/alias names the frontend offers from
+# the browser (e.g. America/Buenos_Aires). Bundling the tzdata wheel gives the
+# runtime the complete set, so timezone validation matches what users can pick.
+tzdata==2026.4
 pytest==8.4.1
