@@ -598,31 +598,88 @@ class PortalChannelOut(BaseModel):
     capabilities: dict[str, bool] | None = None
 
 
+class TemplateHeaderOut(BaseModel):
+    format: str
+    text: str = ""
+    parameters: list[str] = []
+
+
+class TemplateButtonOut(BaseModel):
+    type: str
+    text: str = ""
+    url: str = ""
+    phone_number: str = ""
+    example: str = ""
+    # Takes a value at send time: a URL suffix or the code to copy.
+    dynamic: bool = False
+
+
 class TemplateOut(BaseModel):
     id: str | None = None
     name: str
     language: str
     category: str
     status: str
+    parameter_format: str = "POSITIONAL"
+    header: TemplateHeaderOut | None = None
     body: str
     footer: str = ""
+    buttons: list[TemplateButtonOut] = []
+    # Body variables in order; `variables` is their count, kept for the mobile app.
+    parameters: list[str] = []
     variables: int = 0
     rejected_reason: str | None = None
+
+
+class TemplateHeaderIn(BaseModel):
+    format: str = Field(default="NONE", pattern=r"^(NONE|TEXT|IMAGE|VIDEO|DOCUMENT|LOCATION)$")
+    text: str = Field(default="", max_length=60)
+    # The sample handle from the upload endpoint, for media headers.
+    handle: str = Field(default="", max_length=4096)
+
+
+class TemplateButtonIn(BaseModel):
+    type: str = Field(pattern=r"^(QUICK_REPLY|URL|PHONE_NUMBER|COPY_CODE)$")
+    text: str = Field(default="", max_length=25)
+    url: str = Field(default="", max_length=2000)
+    phone_number: str = Field(default="", max_length=32)
+    # The URL suffix example or the copy code example.
+    example: str = Field(default="", max_length=64)
 
 
 class TemplateCreate(BaseModel):
     name: str = Field(min_length=1, max_length=512)
     language: str = Field(default="es", min_length=2, max_length=10)
     category: str = Field(default="UTILITY", pattern=r"^(UTILITY|MARKETING)$")
+    header: TemplateHeaderIn | None = None
     body: str = Field(min_length=1, max_length=1024)
     footer: str = Field(default="", max_length=60)
-    examples: list[str] = []
+    buttons: list[TemplateButtonIn] = Field(default_factory=list, max_length=10)
+    # One example per variable, by its name (or number).
+    examples: dict[str, str] = {}
+
+
+class TemplateSampleOut(BaseModel):
+    handle: str
+
+
+class TemplateLocation(BaseModel):
+    latitude: float
+    longitude: float
+    name: str = Field(default="", max_length=120)
+    address: str = Field(default="", max_length=240)
 
 
 class TemplateSend(BaseModel):
     name: str = Field(min_length=1, max_length=512)
     language: str = Field(min_length=2, max_length=10)
+    # Body values in the order of the template's parameters.
     variables: list[str] = []
+    # The header's variable, or the https link of its media.
+    header_value: str = Field(default="", max_length=2048)
+    location: TemplateLocation | None = None
+    # One slot per button; only the dynamic ones are read.
+    button_values: list[str] = Field(default_factory=list, max_length=10)
 
 
 class ReportDay(BaseModel):

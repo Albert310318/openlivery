@@ -7,13 +7,22 @@ from fastapi.testclient import TestClient
 from app.database import SessionLocal
 from app.models import Message, now_utc
 from app.routers import portal as portal_router
+from app.services.whatsapp_templates import normalize
 
 
-APPROVED = {
+# As Meta returns them, so the tests read what the portal reads.
+APPROVED = normalize({
     "id": "1", "name": "saludo_inicial", "language": "es", "category": "UTILITY", "status": "APPROVED",
-    "body": "Hola {{1}}, te escribimos de {{2}}.", "footer": "Responde para continuar.", "variables": 2, "rejected_reason": None,
-}
-PENDING = {**APPROVED, "id": "2", "name": "promo", "status": "PENDING", "body": "Promo!", "footer": "", "variables": 0}
+    "parameter_format": "NAMED",
+    "components": [
+        {"type": "BODY", "text": "Hola {{nombre}}, te escribimos de {{empresa}}."},
+        {"type": "FOOTER", "text": "Responde para continuar."},
+    ],
+})
+PENDING = normalize({
+    "id": "2", "name": "promo", "language": "es", "category": "MARKETING", "status": "PENDING",
+    "components": [{"type": "BODY", "text": "Promo!"}],
+})
 
 
 def _portal_with_cloud_line(client: TestClient):
@@ -103,10 +112,20 @@ def test_templates_are_read_and_submitted_through_the_business_account(authentic
     assert bad.status_code == 422
     ok = client.post(
         f"/api/portal/{slug}/templates",
-        json={"name": "bienvenida", "language": "es", "category": "UTILITY", "body": "Bienvenido {{1}}", "examples": ["Sam"]},
+        json={"name": "bienvenida", "language": "es", "category": "UTILITY", "body": "Bienvenido {{nombre}}, hola", "examples": {"nombre": "Sam"}},
     )
     assert ok.status_code == 201 and ok.json()["status"] == "PENDING"
-    assert created.call_args.kwargs["examples"] == ["Sam"]
+    assert created.call_args.kwargs["examples"] == {"nombre": "Sam"}
+    assert created.call_args.kwargs["header"] is None and created.call_args.kwargs["buttons"] == []
+
+    # A media header sample goes up through the business token and comes back as a handle.
+    uploaded = AsyncMock(return_value="4:handle")
+    monkeypatch.setattr(portal_router, "upload_sample", uploaded)
+    sample = client.post(f"/api/portal/{slug}/templates/samples", files={"file": ("promo.png", b"\x89PNG...", "image/png")})
+    assert sample.status_code == 201 and sample.json() == {"handle": "4:handle"}
+    assert uploaded.call_args.args == ("tok",) and uploaded.call_args.kwargs["mime"] == "image/png"
+    refused = client.post(f"/api/portal/{slug}/templates/samples", files={"file": ("promo.gif", b"GIF89a", "image/gif")})
+    assert refused.status_code == 415
 
 
 def test_a_template_starts_a_conversation_and_the_window_rules_replies(authenticated_client: TestClient, monkeypatch):
@@ -126,7 +145,12 @@ def test_a_template_starts_a_conversation_and_the_window_rules_replies(authentic
     conv = opened.json()
     assert conv["mode"] == "human" and conv["assignee_name"] == "Ana" and conv["status"] == "open"
     assert conv["reply_window_open"] is False and conv["reply_window_until"] is None
-    assert sent.call_args.kwargs == {"name": "saludo_inicial", "language": "es", "variables": ["Sam", "Outbound Co"]}
+    assert sent.call_args.kwargs == {"name": "saludo_inicial", "language": "es", "components": [
+        {"type": "body", "parameters": [
+            {"type": "text", "text": "Sam", "parameter_name": "nombre"},
+            {"type": "text", "text": "Outbound Co", "parameter_name": "empresa"},
+        ]},
+    ]}
     assert sent.call_args.args[2] == "573001112233"
     kinds = [(m["kind"], m.get("activity", {}) or {}) for m in conv["messages"]]
     assert kinds[0] == ("activity", {"event": "started"})
@@ -178,7 +202,7 @@ def test_the_agency_manages_templates_from_the_client_page(authenticated_client:
     assert [r["name"] for r in rows] == ["saludo_inicial", "promo"]
     assert listed.call_args.args == ("tok", "WABA1")
 
-    submitted = client.post(base, json={"name": "bienvenida", "language": "es", "body": "Bienvenido {{1}}", "examples": ["Ana"]})
+    submitted = client.post(base, json={"name": "bienvenida", "language": "es", "body": "Bienvenido {{1}}, hola", "examples": {"1": "Ana"}})
     assert submitted.status_code == 201, submitted.text
     assert created.call_args.kwargs["name"] == "bienvenida" and created.call_args.args == ("tok", "WABA1")
 

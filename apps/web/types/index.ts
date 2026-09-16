@@ -260,16 +260,49 @@ export type WhatsAppCloudChannel = {
   updated_at: string;
 };
 
+export type TemplateHeader = {
+  format: "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT" | "LOCATION" | string;
+  text: string;
+  parameters: string[];
+};
+
+export type TemplateButton = {
+  type: "QUICK_REPLY" | "URL" | "PHONE_NUMBER" | "COPY_CODE" | string;
+  text: string;
+  url: string;
+  phone_number: string;
+  example: string;
+  /** Takes a value at send time: a URL suffix or the code to copy. */
+  dynamic: boolean;
+};
+
 export type Template = {
   id: string | null;
   name: string;
   language: string;
   category: string;
   status: "APPROVED" | "PENDING" | "REJECTED" | string;
+  parameter_format: "NAMED" | "POSITIONAL" | string;
+  header: TemplateHeader | null;
   body: string;
   footer: string;
+  buttons: TemplateButton[];
+  /** Body variables in order; `variables` is their count. */
+  parameters: string[];
   variables: number;
   rejected_reason: string | null;
+};
+
+export type TemplateSend = {
+  name: string;
+  language: string;
+  /** Body values in the order of the template's parameters. */
+  variables: string[];
+  /** The header's variable, or the https link of its media. */
+  header_value?: string;
+  location?: { latitude: number; longitude: number; name?: string; address?: string } | null;
+  /** One slot per button; only the dynamic ones are read. */
+  button_values?: string[];
 };
 
 export type PortalReport = {

@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # Meta Graph API root used by the WhatsApp Cloud API channel; override to
     # point at a mock server in tests.
     meta_graph_base_url: str = "https://graph.facebook.com/v23.0"
+    # The Meta app the WhatsApp Cloud API tokens belong to. Only needed to
+    # upload the sample file of a template header: Meta files uploads under
+    # the app, not the business account.
+    whatsapp_app_id: str = ""
     # Official messaging APIs. App credentials remain on the server.
     social_graph_version: str = "v25.0"
     social_worker_enabled: bool = True

@@ -28,6 +28,7 @@ from ..schemas import (
     TeamUpsert,
     TemplateCreate,
     TemplateOut,
+    TemplateSampleOut,
 )
 from ..security import hash_password
 from ..services.attachments import logo_response
@@ -38,7 +39,9 @@ from ..services.whatsapp_templates import (
     create_template,
     delete_template,
     list_templates,
+    read_sample,
     template_credentials,
+    upload_sample,
     validate_template_name,
 )
 from ..services import dns as dns_service
@@ -374,10 +377,21 @@ async def client_create_template(
         name=validate_template_name(payload.name),
         language=payload.language.strip(),
         category=payload.category,
+        header=payload.header.model_dump() if payload.header else None,
         body=payload.body.strip(),
         footer=payload.footer,
+        buttons=[button.model_dump() for button in payload.buttons],
         examples=payload.examples,
     )
+
+
+@router.post("/{client_id}/templates/samples", response_model=TemplateSampleOut, status_code=status.HTTP_201_CREATED)
+async def client_upload_template_sample(
+    client_id: uuid.UUID, file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
+    token, _waba_id = template_credentials(db, _client(db, user, client_id))
+    data, mime, filename = await read_sample(file)
+    return {"handle": await upload_sample(token, data=data, mime=mime, filename=filename)}
 
 
 @router.delete("/{client_id}/templates/{name}", status_code=status.HTTP_204_NO_CONTENT)

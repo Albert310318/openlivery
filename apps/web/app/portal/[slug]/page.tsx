@@ -22,7 +22,7 @@ import { api, ApiError, apiUrl, apiWithHeaders, messageFrom } from "@/lib/api";
 import { activityText as activityLine } from "@/lib/activity";
 import { formatTime, formatWhen, isNearBottom, isSameOpenThread } from "@/lib/datetime";
 import { useLanguage, useT } from "@/lib/i18n";
-import type { Attachment, Conversation, Message, PortalChannel, PortalPublic, Team } from "@/types";
+import type { Attachment, Conversation, Message, PortalChannel, PortalPublic, Team, TemplateSend } from "@/types";
 
 const POLL_MS = 8000;
 
@@ -333,7 +333,7 @@ function PortalInbox({ slug, portal, session, logout }: { slug: string; portal: 
     setSelected(await api<Conversation>(`/portal/${slug}/conversations/${selected.id}/assignment`, { method: "POST", body: JSON.stringify({ assignee_id: assigneeId }) }));
     await refresh();
   }
-  async function replyWithTemplate(payload: { name: string; language: string; variables: string[] }) {
+  async function replyWithTemplate(payload: TemplateSend) {
     if (!selected || selected.channel !== "whatsapp_cloud") return;
     setSelected(await api<Conversation>(`/portal/${slug}/conversations/${selected.id}/reply-template`, { method: "POST", body: JSON.stringify(payload) }));
     await refresh();

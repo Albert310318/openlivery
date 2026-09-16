@@ -18,7 +18,7 @@ import { api, ApiError, apiUrl, apiWithHeaders, messageFrom } from "@/lib/api";
 import { formatTime, formatWhen } from "@/lib/datetime";
 import { useLanguage, useT, type I18nKey } from "@/lib/i18n";
 import { tagStyle } from "@/lib/tags";
-import type { Attachment, Contact, ContactImportResult, ContactTag, Conversation, PortalChannel } from "@/types";
+import type { Attachment, Contact, ContactImportResult, ContactTag, Conversation, PortalChannel, TemplateSend } from "@/types";
 
 const LIMIT = 50;
 const HISTORY_LIMIT = 20;
@@ -82,7 +82,7 @@ export function ContactsView({ slug, channels, openConversation, can }: { slug: 
   const [starting, setStarting] = useState<"whatsapp_cloud" | "whatsapp" | null>(null);
   const [choosingLine, setChoosingLine] = useState(false);
   const lineDetail = (line: PortalChannel) => [line.display_name, formatPhone(line.phone_number)].filter(Boolean).join(" · ");
-  async function startWithTemplate(payload: { name: string; language: string; variables: string[] }) {
+  async function startWithTemplate(payload: TemplateSend) {
     if (!selected) return;
     const conv = await api<Conversation>(`/portal/${slug}/contacts/${selected.id}/conversations`, { method: "POST", body: JSON.stringify({ channel: "whatsapp_cloud", template: payload }) });
     openConversation(conv);

@@ -41,6 +41,7 @@ from ..schemas import (
     ReportDay,
     TemplateCreate,
     TemplateOut,
+    TemplateSampleOut,
     TemplateSend,
     ConversationDetail,
     ConversationAssignmentUpdate,
@@ -67,9 +68,12 @@ from ..services.whatsapp_templates import (
     create_template,
     delete_template,
     list_templates,
-    render,
+    read_sample,
+    rendered_text,
+    send_components,
     send_template,
     template_credentials,
+    upload_sample,
     validate_template_name,
     window_is_open,
     window_open_until,
@@ -1125,10 +1129,23 @@ async def portal_create_template(
         name=validate_template_name(payload.name),
         language=payload.language.strip(),
         category=payload.category,
+        header=payload.header.model_dump() if payload.header else None,
         body=payload.body.strip(),
         footer=payload.footer,
+        buttons=[button.model_dump() for button in payload.buttons],
         examples=payload.examples,
     )
+
+
+@router.post("/{slug}/templates/samples", dependencies=[Depends(require_permission(TEMPLATES_MANAGE))], response_model=TemplateSampleOut, status_code=status.HTTP_201_CREATED)
+async def portal_upload_template_sample(
+    slug: str, file: UploadFile = File(...), client: Client = Depends(_portal_client), db: Session = Depends(get_db)
+):
+    """Store the sample file a media header is reviewed with; the handle
+    goes into the template."""
+    token, _waba_id = template_credentials(db, client)
+    data, mime, filename = await read_sample(file)
+    return {"handle": await upload_sample(token, data=data, mime=mime, filename=filename)}
 
 
 @router.delete("/{slug}/templates/{name}", dependencies=[Depends(require_permission(TEMPLATES_MANAGE))], status_code=status.HTTP_204_NO_CONTENT)
@@ -1424,15 +1441,17 @@ async def _send_template_to(db: Session, client: Client, to: str, payload: Templ
     )
     if not approved:
         raise HTTPException(status_code=409, detail="That template is not approved for this language")
-    if len(payload.variables) != approved["variables"]:
-        raise HTTPException(status_code=422, detail=f"This template takes {approved['variables']} values")
-    external_id = await send_template(
-        token, channel.phone_number_id, to, name=payload.name, language=payload.language, variables=payload.variables
+    components = send_components(
+        approved,
+        body_values=payload.variables,
+        header_value=payload.header_value,
+        location=payload.location.model_dump() if payload.location else None,
+        button_values=payload.button_values,
     )
-    text = render(approved["body"], payload.variables)
-    if approved["footer"]:
-        text = f"{text}\n\n{approved['footer']}"
-    return external_id, text
+    external_id = await send_template(
+        token, channel.phone_number_id, to, name=payload.name, language=payload.language, components=components
+    )
+    return external_id, rendered_text(approved, body_values=payload.variables, header_value=payload.header_value)
 
 
 @router.post("/{slug}/contacts/{contact_id}/conversations", response_model=ConversationDetail, status_code=status.HTTP_201_CREATED)
