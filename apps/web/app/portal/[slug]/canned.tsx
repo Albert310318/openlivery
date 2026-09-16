@@ -1,21 +1,27 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LoaderCircle, Pencil, Plus, Trash2 } from "lucide-react";
+import { Bold, Code, Italic, LoaderCircle, Pencil, Plus, Strikethrough, Trash2 } from "lucide-react";
 import { Alert } from "@/components/ui";
+import { WhatsAppMarkup } from "@/components/whatsapp-preview";
 import { api, ApiError, messageFrom } from "@/lib/api";
 import { useT } from "@/lib/i18n";
+import { CONTACT_EXAMPLES, CONTACT_VARIABLES, type ContactValues } from "@/lib/contact-variables";
 import type { CannedResponse } from "@/types";
 
-export type CannedVars = { contact_name: string; contact_phone: string; contact_email: string; my_name: string };
+export type CannedVars = ContactValues;
+
+// The contact variables, plus `my_name` kept as an alias so replies saved
+// before the rename keep resolving.
+const CANNED_TOKENS = new RegExp(`\\{(${[...CONTACT_VARIABLES, "my_name"].join("|")})\\}`, "g");
 
 /** Fill the placeholders a saved reply may carry; unknown values stay visible
  * so the operator notices and edits before sending. */
 export function renderCanned(content: string, vars: CannedVars): string {
-  return content.replace(/\{(contact_name|contact_phone|contact_email|my_name)\}/g, (whole, key) => vars[key as keyof CannedVars] || whole);
+  return content.replace(CANNED_TOKENS, (whole, key) => (key === "my_name" ? vars.agent_name : vars[key as keyof CannedVars]) || whole);
 }
 
-const VARIABLES = ["{contact_name}", "{contact_phone}", "{contact_email}", "{my_name}"] as const;
+const VARIABLES = CONTACT_VARIABLES.map((name) => `{${name}}`);
 const SHOWN = 8;
 
 /** Saved replies for the composer: typing "/" opens a picker filtered by what
@@ -77,6 +83,7 @@ export function CannedRepliesView({ slug, canManage }: { slug: string; canManage
   const t = useT();
   const [items, setItems] = useState<CannedResponse[]>([]);
   const [editing, setEditing] = useState<CannedResponse | "new" | null>(null);
+  const [content, setContent] = useState("");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -84,23 +91,30 @@ export function CannedRepliesView({ slug, canManage }: { slug: string; canManage
 
   const load = useCallback(() => api<CannedResponse[]>(`/portal/${slug}/canned-responses`).then(setItems).catch((err) => setError(messageFrom(err))), [slug]);
   useEffect(() => { load(); }, [load]);
+  // Load the body being edited, or clear it for a new reply.
+  useEffect(() => { setContent(editing && editing !== "new" ? editing.content : ""); }, [editing]);
 
   function insertVariable(token: string) {
     const el = contentRef.current;
+    const at = el ? el.selectionStart : content.length;
+    setContent(content.slice(0, at) + token + content.slice(at));
+    requestAnimationFrame(() => { if (el) { el.focus(); const caret = at + token.length; el.setSelectionRange(caret, caret); } });
+  }
+
+  // Wrap the selection in WhatsApp's markers, or drop a pair for the caret.
+  function wrap(mark: string) {
+    const el = contentRef.current;
     if (!el) return;
-    const start = el.selectionStart ?? el.value.length;
-    const end = el.selectionEnd ?? start;
-    el.value = el.value.slice(0, start) + token + el.value.slice(end);
-    const caret = start + token.length;
-    el.focus();
-    el.setSelectionRange(caret, caret);
+    const [start, end] = [el.selectionStart, el.selectionEnd];
+    setContent(content.slice(0, start) + mark + content.slice(start, end) + mark + content.slice(end));
+    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(start + mark.length, end + mark.length); });
   }
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!editing) return;
     const data = new FormData(event.currentTarget);
-    const body = { shortcut: String(data.get("shortcut") || "").trim().toLowerCase(), content: String(data.get("content") || "").trim() };
+    const body = { shortcut: String(data.get("shortcut") || "").trim().toLowerCase(), content: content.trim() };
     setBusy(true); setError("");
     try {
       if (editing === "new") await api<CannedResponse>(`/portal/${slug}/canned-responses`, { method: "POST", body: JSON.stringify(body) });
@@ -131,10 +145,17 @@ export function CannedRepliesView({ slug, canManage }: { slug: string; canManage
             <span className="field-help">{t("portal.canned.form.shortcutHelp")}</span>
           </label>
           <label>{t("portal.canned.form.content")}
-            <textarea ref={contentRef} name="content" rows={4} required maxLength={4000} defaultValue={editing === "new" ? "" : editing.content} placeholder={t("portal.canned.form.contentPlaceholder")} />
-            <span className="field-help">{t("portal.canned.form.variablesHint")}</span>
+            <textarea ref={contentRef} rows={4} required maxLength={4000} value={content} onChange={(e) => setContent(e.target.value)} placeholder={t("portal.canned.form.contentPlaceholder")} />
           </label>
+          <div className="template-toolbar">
+            <button type="button" className="icon-button" title={t("portal.templates.form.bold")} aria-label={t("portal.templates.form.bold")} onClick={() => wrap("*")}><Bold size={14} /></button>
+            <button type="button" className="icon-button" title={t("portal.templates.form.italic")} aria-label={t("portal.templates.form.italic")} onClick={() => wrap("_")}><Italic size={14} /></button>
+            <button type="button" className="icon-button" title={t("portal.templates.form.strike")} aria-label={t("portal.templates.form.strike")} onClick={() => wrap("~")}><Strikethrough size={14} /></button>
+            <button type="button" className="icon-button" title={t("portal.templates.form.mono")} aria-label={t("portal.templates.form.mono")} onClick={() => wrap("```")}><Code size={14} /></button>
+          </div>
           <div className="canned-vars">{VARIABLES.map((v) => <button type="button" key={v} onClick={() => insertVariable(v)}>{v}</button>)}</div>
+          <span className="field-help">{t("portal.canned.form.variablesHint")}</span>
+          {content.trim() && <div className="canned-preview"><span>{t("portal.canned.form.preview")}</span><p><WhatsAppMarkup text={renderCanned(content, CONTACT_EXAMPLES)} /></p></div>}
           {error && <Alert>{error}</Alert>}
           <div className="modal-actions">
             <button type="button" className="button" onClick={() => { setEditing(null); setError(""); }}>{t("portal.contacts.form.cancel")}</button>

@@ -5,6 +5,7 @@ import { Bold, CheckCircle2, CircleHelp, Clock, Code, Copy, ExternalLink, FileTe
 import { Alert, EmptyState, Modal } from "@/components/ui";
 import { Combobox } from "@/components/combobox";
 import { TEMPLATE_VARIABLE, WhatsAppPreview, templateParameters, type PreviewHeader } from "@/components/whatsapp-preview";
+import { CONTACT_EXAMPLES, CONTACT_VARIABLES, isContactVariable, type ContactValues } from "@/lib/contact-variables";
 import { api, ApiError, messageFrom } from "@/lib/api";
 import { useT, type TranslateFn } from "@/lib/i18n";
 import { TEMPLATE_LANGUAGES, TEMPLATE_LANGUAGE_CODES, templateLanguageLabel } from "@/lib/template-languages";
@@ -329,17 +330,27 @@ function TemplateBuilder({ base, onClose, onCreated }: { base: string; onClose: 
     requestAnimationFrame(() => { el.focus(); el.setSelectionRange(start + mark.length, end + mark.length); });
   }
 
-  function insertVariable() {
-    const name = (newVar || "").trim();
-    if (!name) return;
+  // Drop a {{name}} at the caret, padding a space when it would touch a word.
+  // A contact variable brings its own example so it is ready for review.
+  function insertBody(name: string, example?: string) {
     const el = bodyRef.current;
     const at = el ? el.selectionStart : d.body.length;
     const before = d.body.slice(0, at);
     const pad = before && !/\s$/.test(before) ? " " : "";
     const token = `${pad}{{${name}}}`;
-    patch({ body: `${before}${token}${d.body.slice(at)}` });
+    setD((prev) => ({
+      ...prev,
+      body: `${prev.body.slice(0, at)}${token}${prev.body.slice(at)}`,
+      examples: example ? { ...prev.examples, [name]: prev.examples[name] || example } : prev.examples,
+    }));
+    requestAnimationFrame(() => { if (el) { el.focus(); const caret = at + token.length; el.setSelectionRange(caret, caret); } });
+  }
+
+  function insertVariable() {
+    const name = (newVar || "").trim();
+    if (!name) return;
+    insertBody(name);
     setNewVar(null);
-    requestAnimationFrame(() => { if (el) { el.focus(); el.setSelectionRange(at + token.length, at + token.length); } });
   }
 
   function addButton(type: ButtonType) {
@@ -439,6 +450,10 @@ function TemplateBuilder({ base, onClose, onCreated }: { base: string; onClose: 
                 <button type="button" className="icon-button" onClick={() => setNewVar(null)} aria-label={t("portal.contacts.form.cancel")}><X size={14} /></button>
               </span>}
           </div>
+          <div className="template-contact-vars">
+            <span>{t("portal.templates.form.contactVars")}</span>
+            {CONTACT_VARIABLES.map((name) => <button type="button" key={name} onClick={() => insertBody(name, CONTACT_EXAMPLES[name])}>{`{{${name}}}`}</button>)}
+          </div>
           <span className="field-help">{t("portal.templates.form.bodyHelp")}</span>
         </label>
 
@@ -492,7 +507,7 @@ function TemplateBuilder({ base, onClose, onCreated }: { base: string; onClose: 
 }
 
 /** Pick an approved template and fill its values. Used to start a conversation and to reach out after the window closed. */
-export function TemplatePicker({ base, open, title, onClose, onSend }: { base: string; open: boolean; title: string; onClose: () => void; onSend: (payload: TemplateSend) => Promise<void> }) {
+export function TemplatePicker({ base, open, title, contactValues, onClose, onSend }: { base: string; open: boolean; title: string; contactValues?: ContactValues; onClose: () => void; onSend: (payload: TemplateSend) => Promise<void> }) {
   const t = useT();
   const [items, setItems] = useState<Template[]>([]);
   const [loading, setLoading] = useState(false);
@@ -511,8 +526,14 @@ export function TemplatePicker({ base, open, title, onClose, onSend }: { base: s
     setLoading(true); setError(""); setChosen("");
     api<Template[]>(`${base}/templates`).then(setItems).catch((err) => setError(messageFrom(err))).finally(() => setLoading(false));
   }, [open, base]);
+  // A variable named after a contact property starts filled from the contact,
+  // so it never travels empty; the operator can still edit it.
+  const prefill = (name: string) => (contactValues && isContactVariable(name) ? contactValues[name] : "");
   useEffect(() => {
-    setValues({}); setHeaderValue(""); setPlace({ latitude: "", longitude: "", name: "", address: "" });
+    setValues(template ? Object.fromEntries(template.parameters.map((n) => [n, prefill(n)])) : {});
+    const headerName = template?.header?.format === "TEXT" ? template.header.parameters[0] : undefined;
+    setHeaderValue(headerName ? prefill(headerName) : "");
+    setPlace({ latitude: "", longitude: "", name: "", address: "" });
     setButtonValues(template ? template.buttons.map(() => "") : []);
   }, [template]);
 

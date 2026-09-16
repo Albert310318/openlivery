@@ -29,6 +29,13 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
   });
 }
 
+/** An already-substituted string with WhatsApp's inline formatting and line
+ * breaks. Used where the variables were filled beforehand (a saved reply). */
+export function WhatsAppMarkup({ text }: { text: string }) {
+  const lines = (text || "").split("\n");
+  return <>{lines.map((line, row) => <Fragment key={row}>{row > 0 && <br />}{inline(line, `l${row}`)}</Fragment>)}</>;
+}
+
 /** WhatsApp formatting plus variables: a filled one shows its value, an
  * unfilled one stays as a chip so it is obvious what is still missing. */
 export function TemplateText({ text, values }: { text: string; values: Record<string, string> }) {

@@ -1080,6 +1080,14 @@ textarea { line-height: 1.55; }
 .canned-vars { display: flex; gap: 6px; flex-wrap: wrap; }
 .canned-vars button { padding: 3px 9px; color: var(--accent-text); border: 1px solid var(--accent-line); border-radius: 6px; background: var(--accent-soft); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; cursor: pointer; }
 .canned-vars button:hover { border-color: var(--accent-line); background: var(--accent-soft); }
+.canned-preview { padding: 12px 14px; border-radius: 10px; background: #e5ddd5; }
+.canned-preview > span { display: block; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: #667781; font-weight: 700; margin-bottom: 6px; }
+.canned-preview > p { margin: 0; padding: 7px 9px; border-radius: 0 8px 8px 8px; background: #fff; color: #111b21; font-size: 14px; line-height: 19px; white-space: pre-wrap; box-shadow: 0 1px .5px rgba(11,20,26,.13); }
+.canned-preview code { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+/* Contact variables offered in the template builder, styled like the canned ones. */
+.template-contact-vars { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.template-contact-vars > span { color: var(--subtle); font-size: 12px; font-weight: 500; }
+.template-contact-vars button { padding: 3px 9px; color: var(--accent-text); border: 1px solid var(--accent-line); border-radius: 6px; background: var(--accent-soft); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; cursor: pointer; }
 .canned-shortcut-field { display: flex; align-items: center; }
 .canned-shortcut-field span { display: grid; place-items: center; height: 43px; padding: 0 10px; color: var(--muted); border: 1px solid var(--line-strong); border-right: 0; border-radius: 7px 0 0 7px; background: var(--canvas); font-weight: 600; }
 .canned-shortcut-field input { border-radius: 0 7px 7px 0; }

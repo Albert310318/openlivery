@@ -19,6 +19,7 @@ import { formatTime, formatWhen } from "@/lib/datetime";
 import { useLanguage, useT, type I18nKey } from "@/lib/i18n";
 import { tagStyle } from "@/lib/tags";
 import type { Attachment, Contact, ContactImportResult, ContactTag, Conversation, PortalChannel, TemplateSend } from "@/types";
+import type { ContactValues } from "@/lib/contact-variables";
 
 const LIMIT = 50;
 const HISTORY_LIMIT = 20;
@@ -35,7 +36,7 @@ const IMPORT_REASONS: Record<string, I18nKey> = {
 
 /** `can` answers whether the signed-in person holds a portal permission; what
  * it hides here the API refuses anyway. */
-export function ContactsView({ slug, channels, openConversation, can }: { slug: string; channels: PortalChannel[]; openConversation: (conversation: Conversation) => void; can: (key: string) => boolean }) {
+export function ContactsView({ slug, channels, openConversation, can, agentName }: { slug: string; channels: PortalChannel[]; openConversation: (conversation: Conversation) => void; can: (key: string) => boolean; agentName: string }) {
   const canManageContacts = can("contacts.manage");
   const canManageTags = can("tags.manage");
   const t = useT();
@@ -478,7 +479,7 @@ export function ContactsView({ slug, channels, openConversation, can }: { slug: 
         </> : <EmptyState icon={<UserRound />} title={t("portal.contacts.selectTitle")} description={t("portal.contacts.selectDescription")} />}
       </section>
     </div>
-    <TemplatePicker base={`/portal/${slug}`} open={starting === "whatsapp_cloud" && Boolean(selected)} title={t("portal.contacts.startTitle", { name: selected ? nameOf(selected) : "" })} onClose={() => setStarting(null)} onSend={startWithTemplate} />
+    <TemplatePicker base={`/portal/${slug}`} open={starting === "whatsapp_cloud" && Boolean(selected)} title={t("portal.contacts.startTitle", { name: selected ? nameOf(selected) : "" })} contactValues={selected ? { contact_name: selected.name || "", contact_phone: selected.phone || "", contact_email: selected.email || "", agent_name: agentName } as ContactValues : undefined} onClose={() => setStarting(null)} onSend={startWithTemplate} />
     <Modal open={starting === "whatsapp" && Boolean(selected)} title={t("portal.contacts.startQrTitle", { name: selected ? nameOf(selected) : "" })} description={t("portal.contacts.startQrDescription")} onClose={() => setStarting(null)}>
       <form className="modal-form" onSubmit={startWithText}>
         <label>{t("portal.contacts.startMessage")}<textarea name="text" rows={4} required autoFocus /></label>
