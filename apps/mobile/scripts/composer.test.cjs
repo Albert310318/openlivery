@@ -9,7 +9,7 @@ const { create, act } = require('react-test-renderer');
 global.IS_REACT_ACT_ENVIRONMENT = true;
 const root = path.resolve(__dirname, '..');
 
-function fixture({ replyWait, failSend = false, nativeRecording = true, capturedSeconds = 3.2, resetTimeOnPause = false, conversationOverrides = {}, fileToPick } = {}) {
+function fixture({ replyWait, failSend = false, nativeRecording = true, capturedSeconds = 3.2, resetTimeOnPause = false, conversationOverrides = {}, fileToPick, permissionPrompt = false } = {}) {
   const calls = { texts: [], files: [], modes: [], alerts: [], permission: 0, recording: false, paused: false, played: 0, stops: 0 };
   let detail = {
     id: 'case-1', client_id: 'client-1', status: 'open', mode: 'human', channel: 'widget',
@@ -20,7 +20,7 @@ function fixture({ replyWait, failSend = false, nativeRecording = true, captured
   const session = { client_id: 'client-1', user_id: 'user-1', user_name: 'Agent', slug: 'example', token: 'test', branding: { brand_color: '#3456ab', client_name: 'Example' } };
   const player = { play: () => { calls.played += 1; }, pause() {}, seekTo: async () => {} };
   const recorder = {
-    uri: 'file:///original-note.m4a', prepareToRecordAsync: async () => {},
+    uri: 'file:///original-note.m4a', prepareToRecordAsync: async () => { if (permissionPrompt === 'during-preparation') changeAppState('inactive'); },
     get isRecording() { return nativeRecording && calls.recording; },
     get currentTime() { return calls.recording || (calls.paused && !resetTimeOnPause) ? capturedSeconds : 0; },
     record: () => { calls.recording = true; calls.paused = false; },
@@ -43,8 +43,14 @@ function fixture({ replyWait, failSend = false, nativeRecording = true, captured
   };
   class FakeFile { exists = true; size = 10; uri = 'file:///incoming.m4a'; }
   class FakeDirectory { exists = true; }
+  const stateListeners = new Set();
+  const appState = { currentState: 'active', addEventListener: (_event, listener) => { stateListeners.add(listener); return { remove: () => stateListeners.delete(listener) }; } };
+  function changeAppState(state) { appState.currentState = state; for (const listener of stateListeners) listener(state); }
   const audio = {
-    AudioModule: { requestRecordingPermissionsAsync: async () => { calls.permission += 1; return { granted: true }; } },
+    AudioModule: {
+      getRecordingPermissionsAsync: async () => ({ granted: !permissionPrompt }),
+      requestRecordingPermissionsAsync: async () => { calls.permission += 1; if (permissionPrompt === true) changeAppState('inactive'); return { granted: true }; },
+    },
     RecordingPresets: { HIGH_QUALITY: {} },
     useAudioRecorder: () => recorder,
     useAudioRecorderState: () => ({ isRecording: calls.recording, durationMillis: 33000 }),
@@ -55,7 +61,7 @@ function fixture({ replyWait, failSend = false, nativeRecording = true, captured
   const native = {
     ...Object.fromEntries(['ActivityIndicator', 'FlatList', 'KeyboardAvoidingView', 'Pressable', 'Text', 'TextInput', 'View', 'Modal'].map((name) => [name, name])),
     StyleSheet: { create: (styles) => styles, hairlineWidth: 1 }, Platform: { OS: 'ios' },
-    Alert: { alert: (title, body) => { calls.alerts.push({ title, body }); } }, AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) },
+    Alert: { alert: (title, body) => { calls.alerts.push({ title, body }); } }, AppState: appState,
     ActionSheetIOS: { showActionSheetWithOptions: (options, callback) => { calls.attachMenu = { ...options, callback }; } }, useColorScheme: () => 'light',
     Animated: { View: 'AnimatedView', Value: class {}, timing() {}, sequence() {}, loop: () => ({ start() {}, stop() {} }) },
   };
@@ -98,6 +104,8 @@ function fixture({ replyWait, failSend = false, nativeRecording = true, captured
   let tree;
   return {
     calls, load,
+    async appState(state) { await act(async () => { changeAppState(state); }); },
+    async settleRecording() { await act(async () => { await new Promise((resolve) => setTimeout(resolve, 550)); }); },
     async mount() { await act(async () => { tree = create(React.createElement(ChatScreen, { server: 'https://example.test', session, conversation: detail, onBack() {} })); }); },
     async mountAudio() {
       const { AttachmentView } = load('src/components/Attachments.tsx');
@@ -206,6 +214,59 @@ test('the microphone stays next to attach with text and offers playback before s
   assert.equal(f.calls.files[0].caption, 'Caption for my audio');
   assert.equal(f.calls.files[0].file.uri, 'file:///original-note.m4a');
   assert.equal(f.input().props.value, '');
+  await f.unmount();
+});
+
+test('first microphone permission waits until its system prompt returns the app to the foreground', async () => {
+  const f = fixture({ permissionPrompt: true });
+  await f.mount();
+  await act(async () => { void f.button('Record audio').props.onPress(); });
+  assert.equal(f.calls.recording, false);
+  await f.appState('active');
+  await f.settleRecording();
+  assert.equal(f.calls.recording, true);
+  assert.equal(f.calls.stops, 0);
+  await f.press('Stop and review audio');
+  await f.press('Send voice note');
+  assert.equal(f.calls.files.length, 1);
+  await f.unmount();
+});
+
+test('backgrounding while microphone permission finishes cancels preparation without starting later', async () => {
+  const f = fixture({ permissionPrompt: true });
+  await f.mount();
+  await act(async () => { void f.button('Record audio').props.onPress(); });
+  await f.appState('background');
+  await f.appState('active');
+  assert.equal(f.calls.recording, false);
+  assert.equal(f.calls.files.length, 0);
+  await f.unmount();
+});
+
+test('a delayed permission transition during native preparation cannot cut off the first note', async () => {
+  const f = fixture({ permissionPrompt: 'during-preparation' });
+  await f.mount();
+  await act(async () => { void f.button('Record audio').props.onPress(); });
+  assert.equal(f.calls.recording, false);
+  await f.appState('active');
+  await f.settleRecording();
+  assert.equal(f.calls.recording, true);
+  assert.equal(f.calls.stops, 0);
+  await f.press('Delete recording');
+  await f.unmount();
+});
+
+test('the first permission callback can precede its queued inactive notification', async () => {
+  const f = fixture({ permissionPrompt: 'after-preparation' });
+  await f.mount();
+  await act(async () => { void f.button('Record audio').props.onPress(); });
+  assert.equal(f.calls.recording, false);
+  await f.appState('inactive');
+  await f.appState('active');
+  await f.settleRecording();
+  assert.equal(f.calls.recording, true);
+  assert.equal(f.calls.stops, 0);
+  await f.press('Delete recording');
   await f.unmount();
 });
 
