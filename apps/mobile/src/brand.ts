@@ -7,6 +7,7 @@
  */
 
 import Constants from "expo-constants";
+import { resolveHostedServer } from "./hostedServer";
 
 export type HostedPreset = {
   /** What to call the service on the sign-in screen, e.g. "Acme Cloud". */
@@ -67,5 +68,5 @@ export const HOSTED: HostedPreset | null = usablePreset(extra.hosted);
 /** Turn what someone typed into the address their workspace lives at. */
 export function hostedServerFor(workspace: string): string {
   if (!HOSTED) return "";
-  return HOSTED.serverTemplate.replace("{workspace}", workspace.trim().toLowerCase());
+  return resolveHostedServer(workspace, HOSTED.serverTemplate) || "";
 }

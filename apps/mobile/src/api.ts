@@ -51,6 +51,8 @@ export type Session = {
   client_id: string;
   user_id: string | null;
   user_name: string;
+  role?: string | null;
+  permissions?: string[];
   branding: Branding;
   push: PushConfig;
   api_version: number;

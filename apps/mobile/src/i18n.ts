@@ -21,15 +21,18 @@ const en = {
     // The hosted option's own name comes from the build's brand file; what to
     // call the alternative, and the workspace, is ordinary interface copy.
     otherServer: "Another server",
-    workspaceLabel: "Agency name",
+    workspaceLabel: "Workspace",
     workspacePlaceholder: "your-agency",
+    workspaceHint: "Enter your workspace name or paste its address.",
+    workspaceUnavailable: "This workspace is unavailable. Check its address or contact your administrator.",
+    incorrectCredentials: "Incorrect email or password. Use your inbox operator account.",
     emailLabel: "E-mail",
     emailPlaceholder: "you@business.com",
     passwordLabel: "Password",
     submit: "Sign in",
     failed: "Could not sign in",
     invalidWorkspace:
-      "Enter the workspace name using letters, numbers or hyphens.",
+      "Enter your workspace name or its HTTPS address.",
     invalidServer: "Enter a valid server address.",
   },
   inbox: {
@@ -155,15 +158,18 @@ const es: typeof en = {
     serverPlaceholder: "chat.miagencia.com",
     serverHint: "La dirección de la instancia que tu agencia tiene montada.",
     otherServer: "Otro servidor",
-    workspaceLabel: "Nombre de la agencia",
+    workspaceLabel: "Espacio de trabajo",
     workspacePlaceholder: "tu-agencia",
+    workspaceHint: "Escribe el nombre de tu espacio o pega su dirección.",
+    workspaceUnavailable: "Este espacio no está disponible. Revisa la dirección o contacta a tu administrador.",
+    incorrectCredentials: "Correo o contraseña incorrectos. Usa tu cuenta de operador de la bandeja.",
     emailLabel: "Correo",
     emailPlaceholder: "tu@negocio.com",
     passwordLabel: "Contraseña",
     submit: "Entrar",
     failed: "No pudimos iniciar sesión",
     invalidWorkspace:
-      "Escribe el nombre del espacio con letras, números o guiones.",
+      "Escribe el nombre de tu espacio o su dirección HTTPS.",
     invalidServer: "Escribe una dirección de servidor válida.",
   },
   inbox: {

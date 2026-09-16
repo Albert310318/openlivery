@@ -152,8 +152,10 @@ export default (): ExpoConfig => {
       ["expo-secure-store", { configureAndroidBackup: true, faceIDPermission: false }],
       "expo-sharing",
       "expo-image",
+      ["expo-localization", { supportedLocales: ["en", "es"] }],
       ["./plugins/withNetworkPolicy", { allowLocalHttp: !release && process.env.APP_VARIANT === "development" }],
       "./plugins/withIosBuildIdentity",
+      "./plugins/withSceneLifecycle",
       ["expo-splash-screen", {
         image: "./assets/splash-icon.png",
         imageWidth: 180,

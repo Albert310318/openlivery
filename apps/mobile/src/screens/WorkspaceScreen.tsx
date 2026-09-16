@@ -11,6 +11,7 @@ import {
 } from "../api";
 import { formatDuration, reportRange } from "../reports";
 import { workspaceStrings } from "../workspaceStrings";
+import { hasPermission } from "../permissions";
 import { contrastOn, readableBrand, tint, useColors, useIsDark } from "../theme";
 
 type Props = { server: string; session: Session; onBack: () => void; onSessionExpired?: () => void };
@@ -22,6 +23,8 @@ export function WorkspaceScreen({ server, session, onBack, onSessionExpired }: P
   const s = workspaceStrings(); const colors = useColors(); const insets = useSafeAreaInsets();
   const brand = readableBrand(session.branding.brand_color, useIsDark());
   const [tab, setTab] = useState<"teams" | "reports">("teams");
+  const canViewReports = hasPermission(session, "reports.view");
+  const activeTab = canViewReports ? tab : "teams";
   const expired = useRef(onSessionExpired); expired.current = onSessionExpired;
   const handleError = useCallback((error: unknown) => {
     if (error instanceof ApiError && error.status === 401) expired.current?.();
@@ -29,12 +32,13 @@ export function WorkspaceScreen({ server, session, onBack, onSessionExpired }: P
   }, [s.loadFailed]);
   return <View style={[styles.screen, { backgroundColor: colors.surface, paddingTop: insets.top }]}>
     <View style={styles.header}><Pressable accessibilityRole="button" accessibilityLabel={s.back} onPress={onBack} style={styles.icon}><Ionicons name="chevron-back" color={brand} size={25} /></Pressable><View style={styles.flex}><Text style={[styles.title, { color: colors.ink }]}>{s.title}</Text><Text style={[styles.meta, { color: colors.muted }]}>{s.subtitle}</Text></View></View>
-    <View style={[styles.tabs, { backgroundColor: colors.canvas }]}>{(["teams", "reports"] as const).map((item) => <Pressable key={item} accessibilityRole="tab" accessibilityState={{ selected: tab === item }} onPress={() => setTab(item)} style={[styles.tab, { backgroundColor: tab === item ? colors.surface : "transparent" }]}><Ionicons name={item === "teams" ? "people-outline" : "bar-chart-outline"} size={17} color={tab === item ? brand : colors.muted} /><Text style={[styles.tabLabel, { color: tab === item ? brand : colors.muted }]}>{s[item]}</Text></Pressable>)}</View>
-    {tab === "teams" ? <TeamsPanel server={server} session={session} brand={brand} handleError={handleError} /> : <ReportsPanel server={server} session={session} brand={brand} handleError={handleError} />}
+    <View style={[styles.tabs, { backgroundColor: colors.canvas }]}>{(["teams", "reports"] as const).filter((item) => item !== "reports" || canViewReports).map((item) => <Pressable key={item} accessibilityRole="tab" accessibilityState={{ selected: activeTab === item }} onPress={() => setTab(item)} style={[styles.tab, { backgroundColor: activeTab === item ? colors.surface : "transparent" }]}><Ionicons name={item === "teams" ? "people-outline" : "bar-chart-outline"} size={17} color={activeTab === item ? brand : colors.muted} /><Text style={[styles.tabLabel, { color: activeTab === item ? brand : colors.muted }]}>{s[item]}</Text></Pressable>)}</View>
+    {activeTab === "teams" ? <TeamsPanel server={server} session={session} brand={brand} handleError={handleError} /> : <ReportsPanel server={server} session={session} brand={brand} handleError={handleError} />}
   </View>;
 }
 
 function TeamsPanel({ server, session, brand, handleError }: Shared) {
+  const canManage = hasPermission(session, "teams.manage");
   const s = workspaceStrings(); const colors = useColors(); const insets = useSafeAreaInsets();
   const [teams, setTeams] = useState<Team[]>([]); const [members, setMembers] = useState<PortalMember[]>([]);
   const [loading, setLoading] = useState(true); const [error, setError] = useState(""); const [refreshing, setRefreshing] = useState(false);
@@ -54,7 +58,7 @@ function TeamsPanel({ server, session, brand, handleError }: Shared) {
   }, [server, session, handleError]);
   useEffect(() => { void load(); }, [load]);
   async function save(payload: TeamUpdate) {
-    if (!editing || mutating.current) return;
+    if (!canManage || !editing || mutating.current) return;
     mutating.current = true; setSaving(true); setSaveError("");
     try {
       if (editing === "new") await createTeam(server, session, payload);
@@ -77,13 +81,13 @@ function TeamsPanel({ server, session, brand, handleError }: Shared) {
     } catch (err) { if (active.current) setError(handleError(err)); }
     finally { changingAvailability.current = false; if (active.current) setAvailabilityBusy(false); }
   }
-  const edit = (team: Team | "new") => { setSaveError(""); setEditing(team); };
+  const edit = (team: Team | "new") => { if (canManage) { setSaveError(""); setEditing(team); } };
   return <>
     <ScrollView refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={brand} />} contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}>
       {error.length > 0 && <ErrorNotice message={error} retry={() => void load()} brand={brand} />}
-      <View style={styles.sectionHeader}><Text style={[styles.sectionTitle, { color: colors.ink }]}>{s.teams}</Text><Pressable accessibilityRole="button" onPress={() => edit("new")} style={[styles.smallButton, { backgroundColor: tint(brand) }]}><Ionicons name="add" color={brand} size={17} /><Text style={{ color: brand }}>{s.newTeam}</Text></Pressable></View>
-      {loading ? <ActivityIndicator color={brand} style={styles.loading} /> : !teams.length ? <View style={[styles.card, { borderColor: colors.line }]}><Ionicons name="people-outline" size={32} color={colors.subtle} /><Text style={[styles.name, { color: colors.ink }]}>{s.noTeams}</Text><Text style={[styles.body, { color: colors.muted }]}>{s.noTeamsHint}</Text></View> : teams.map((team) => <Pressable key={team.id} accessibilityRole="button" accessibilityLabel={`${s.editTeam}: ${team.name}`} onPress={() => edit(team)} style={[styles.card, { borderColor: colors.line, backgroundColor: colors.raised }]}>
-        <View style={styles.row}><Text style={[styles.name, styles.flex, { color: colors.ink }]}>{team.name}</Text>{team.is_default && <Text style={[styles.badge, { color: brand, backgroundColor: tint(brand) }]}>{s.defaultTeam}</Text>}<Ionicons name="create-outline" color={brand} size={18} /></View>
+      <View style={styles.sectionHeader}><Text style={[styles.sectionTitle, { color: colors.ink }]}>{s.teams}</Text>{canManage && <Pressable accessibilityRole="button" onPress={() => edit("new")} style={[styles.smallButton, { backgroundColor: tint(brand) }]}><Ionicons name="add" color={brand} size={17} /><Text style={{ color: brand }}>{s.newTeam}</Text></Pressable>}</View>
+      {loading ? <ActivityIndicator color={brand} style={styles.loading} /> : !teams.length ? <View style={[styles.card, { borderColor: colors.line }]}><Ionicons name="people-outline" size={32} color={colors.subtle} /><Text style={[styles.name, { color: colors.ink }]}>{s.noTeams}</Text><Text style={[styles.body, { color: colors.muted }]}>{canManage ? s.noTeamsHint : s.noTeamsReadOnlyHint}</Text></View> : teams.map((team) => <Pressable key={team.id} disabled={!canManage} accessibilityRole={canManage ? "button" : undefined} accessibilityLabel={canManage ? `${s.editTeam}: ${team.name}` : team.name} onPress={() => edit(team)} style={[styles.card, { borderColor: colors.line, backgroundColor: colors.raised }]}>
+        <View style={styles.row}><Text style={[styles.name, styles.flex, { color: colors.ink }]}>{team.name}</Text>{team.is_default && <Text style={[styles.badge, { color: brand, backgroundColor: tint(brand) }]}>{s.defaultTeam}</Text>}{canManage && <Ionicons name="create-outline" color={brand} size={18} />}</View>
         {team.description.length > 0 && <Text style={[styles.body, { color: colors.muted }]}>{team.description}</Text>}
         <Text style={[styles.meta, { color: colors.muted }]}>{team.strategy === "least_busy" ? s.leastBusy : s.roundRobin} · {team.open_count} {s.open}{team.unassigned_count > 0 ? ` · ${team.unassigned_count} ${s.unassigned}` : ""}</Text>
         <View style={styles.wrap}>{team.members.length ? team.members.map((member) => <View key={member.id} style={[styles.personChip, { backgroundColor: colors.canvas }]}><View style={[styles.dot, { backgroundColor: member.availability === "online" ? "#16a571" : colors.subtle }]} /><Text style={[styles.small, { color: colors.ink }]}>{member.name || member.email}</Text></View>) : <Text style={{ color: colors.muted }}>{s.noMembers}</Text>}</View>
@@ -91,7 +95,7 @@ function TeamsPanel({ server, session, brand, handleError }: Shared) {
       <Text style={[styles.sectionTitle, { color: colors.ink, marginTop: 22 }]}>{s.people}</Text>
       {members.map((member) => <View key={member.id} style={[styles.personRow, { borderBottomColor: colors.line }]}><View style={[styles.dot, { backgroundColor: member.availability === "online" ? "#16a571" : colors.subtle }]} /><View style={styles.flex}><Text style={[styles.name, { color: colors.ink }]}>{member.name || member.email}{member.id === session.user_id ? ` · ${s.me}` : ""}</Text><Text style={[styles.meta, { color: colors.muted }]}>{member.availability === "online" ? s.online : s.away}</Text></View>{member.id === session.user_id && <Pressable accessibilityRole="button" accessibilityLabel={s.changeAvailability} disabled={availabilityBusy} onPress={() => void toggleAvailability(member)} style={styles.availability}>{availabilityBusy ? <ActivityIndicator color={brand} /> : <Text style={[styles.small, { color: brand }]}>{member.availability === "online" ? s.goAway : s.goOnline}</Text>}</Pressable>}</View>)}
     </ScrollView>
-    <Modal visible={editing !== null} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => { if (!saving) setEditing(null); }}>
+    <Modal visible={canManage && editing !== null} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => { if (!saving) setEditing(null); }}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={[styles.screen, { backgroundColor: colors.surface, paddingTop: Platform.OS === "android" ? insets.top : 12 }]}>
         <View style={[styles.modalHeader, { borderBottomColor: colors.line }]}><Pressable disabled={saving} onPress={() => setEditing(null)} style={styles.cancel}><Text style={{ color: brand }}>{s.cancel}</Text></Pressable><Text style={[styles.modalTitle, { color: colors.ink }]}>{editing === "new" ? s.newTeam : s.editTeam}</Text><View style={{ width: 80 }} /></View>
         {saveError.length > 0 && <Text accessibilityRole="alert" style={[styles.error, { color: colors.danger }]}>{saveError}</Text>}

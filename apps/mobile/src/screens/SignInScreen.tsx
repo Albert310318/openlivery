@@ -71,14 +71,14 @@ export function SignInScreen({ onSignedIn }: { onSignedIn: (server: string, sess
 
   async function submit() {
     if (!canSubmit || submitting.current) return;
-    if (useHosted && !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(workspace.trim())) {
+    const base = useHosted ? hostedServerFor(workspace) : normalizeServerUrl(server);
+    if (useHosted && !base) {
       setError(s.signIn.invalidWorkspace);
       return;
     }
     submitting.current = true;
     setBusy(true);
     setError(null);
-    const base = useHosted ? hostedServerFor(workspace) : normalizeServerUrl(server);
     try {
       const url = new URL(base);
       if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
@@ -87,7 +87,9 @@ export function SignInScreen({ onSignedIn }: { onSignedIn: (server: string, sess
       const session = await signIn(base, email.trim(), password);
       await onSignedIn(base, session);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : err instanceof TypeError ? s.signIn.invalidServer : s.signIn.failed);
+      setError(err instanceof ApiError && err.status === 404 ? s.signIn.workspaceUnavailable
+        : err instanceof ApiError && err.status === 401 ? s.signIn.incorrectCredentials
+        : err instanceof ApiError ? err.message : err instanceof TypeError ? s.signIn.invalidServer : s.signIn.failed);
     } finally {
       submitting.current = false;
       setBusy(false);
@@ -147,7 +149,7 @@ export function SignInScreen({ onSignedIn }: { onSignedIn: (server: string, sess
                 editable={!busy}
                 testID="sign-in-workspace"
               />
-              {workspace.trim() ? <Text style={[styles.hint, { color: colors.subtle }]}>{hostedServerFor(workspace)}</Text> : null}
+              <Text style={[styles.hint, { color: colors.subtle }]}>{hostedServerFor(workspace) || s.signIn.workspaceHint}</Text>
             </View>
           ) : (
             <View>
