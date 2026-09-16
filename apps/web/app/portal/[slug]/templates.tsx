@@ -92,7 +92,8 @@ function issuesOf(d: Draft, t: TranslateFn): string[] {
   const footer = d.footer.trim();
   if (footer.length > LIMITS.footer) out.push(t("portal.templates.rules.tooLong", { part: t("portal.templates.form.footer"), max: LIMITS.footer }));
   if (variables(footer)) out.push(t("portal.templates.rules.footerVariables"));
-  if ([...headerNames, ...bodyNames].some((n) => !(d.examples[n] || "").trim())) out.push(t("portal.templates.rules.examplesMissing"));
+  // Contact variables bring their own review sample; only custom ones are asked for.
+  if ([...headerNames, ...bodyNames].some((n) => !isContactVariable(n) && !(d.examples[n] || "").trim())) out.push(t("portal.templates.rules.examplesMissing"));
 
   const counts = { QUICK_REPLY: 0, URL: 0, PHONE_NUMBER: 0, COPY_CODE: 0 };
   const seen = new Set<string>();
@@ -287,6 +288,8 @@ function TemplateBuilder({ base, onClose, onCreated }: { base: string; onClose: 
   const bodyNames = useMemo(() => templateParameters(d.body), [d.body]);
   const headerNames = useMemo(() => (d.headerFormat === "TEXT" ? templateParameters(d.headerText) : []), [d.headerFormat, d.headerText]);
   const names = useMemo(() => Array.from(new Set([...headerNames, ...bodyNames])), [headerNames, bodyNames]);
+  // Contact variables fill themselves; only the custom ones need a sample.
+  const customNames = useMemo(() => names.filter((n) => !isContactVariable(n)), [names]);
   const issues = useMemo(() => issuesOf(d, t), [d, t]);
   const languageLabels = useMemo(() => Object.fromEntries(TEMPLATE_LANGUAGE_CODES.map((code) => [code, `${TEMPLATE_LANGUAGES[code]} · ${code}`])), []);
 
@@ -373,7 +376,7 @@ function TemplateBuilder({ base, onClose, onCreated }: { base: string; onClose: 
         body: d.body.trim(),
         footer: d.footer.trim(),
         buttons: d.buttons.map((b) => ({ type: b.type, text: b.text.trim(), url: b.url.trim(), phone_number: b.phone_number.trim(), example: b.example.trim() })),
-        examples: Object.fromEntries(names.map((n) => [n, (d.examples[n] || "").trim()])),
+        examples: Object.fromEntries(names.map((n) => [n, (d.examples[n] || (isContactVariable(n) ? CONTACT_EXAMPLES[n] : "")).trim()])),
       }) });
       await onCreated();
     } catch (err) { setError(messageFrom(err)); } finally { setBusy(false); }
@@ -381,6 +384,8 @@ function TemplateBuilder({ base, onClose, onCreated }: { base: string; onClose: 
 
   const media = d.headerFormat === "IMAGE" || d.headerFormat === "VIDEO" || d.headerFormat === "DOCUMENT";
   const previewButtons = d.buttons.map((b) => ({ type: b.type, text: b.text }));
+  // Contact variables preview with their stand-in even when typed by hand.
+  const previewValues = { ...Object.fromEntries(names.filter(isContactVariable).map((n) => [n, CONTACT_EXAMPLES[n]])), ...d.examples };
 
   return <Modal open title={t("portal.templates.newTitle")} description={t("portal.templates.newDescription")} onClose={onClose} wide>
     <form className="modal-form template-builder" onSubmit={submit}>
@@ -457,9 +462,12 @@ function TemplateBuilder({ base, onClose, onCreated }: { base: string; onClose: 
           <span className="field-help">{t("portal.templates.form.bodyHelp")}</span>
         </label>
 
-        {names.length > 0 && <div className="stack-field">
+        {customNames.length > 0 && <div className="stack-field">
           <span className="label-row"><strong>{t("portal.templates.form.examples")}</strong><Hint text={t("portal.templates.tips.variables")} /></span>
-          <div className="form-grid">{names.map((n) => <label key={n}>{t("portal.templates.form.example", { n })}<input value={d.examples[n] || ""} required onChange={(e) => patch({ examples: { ...d.examples, [n]: e.target.value } })} /></label>)}</div>
+          <table className="template-examples"><tbody>{customNames.map((n) => <tr key={n}>
+            <th><code>{`{{${n}}}`}</code></th>
+            <td><input value={d.examples[n] || ""} required placeholder={t("portal.templates.form.examplePlaceholder")} onChange={(e) => patch({ examples: { ...d.examples, [n]: e.target.value } })} /></td>
+          </tr>)}</tbody></table>
           <span className="field-help">{t("portal.templates.form.examplesHelp")}</span>
         </div>}
 
@@ -495,7 +503,7 @@ function TemplateBuilder({ base, onClose, onCreated }: { base: string; onClose: 
 
       <aside className="template-builder-side">
         <span>{t("portal.templates.preview.title")}</span>
-        <WhatsAppPreview header={previewHeader(d)} body={d.body} footer={d.footer} buttons={previewButtons} values={d.examples} empty={t("portal.templates.preview.empty")} />
+        <WhatsAppPreview header={previewHeader(d)} body={d.body} footer={d.footer} buttons={previewButtons} values={previewValues} empty={t("portal.templates.preview.empty")} />
         {names.length > 0 && <small>{t("portal.templates.preview.examplesNote")}</small>}
       </aside>
 
