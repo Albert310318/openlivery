@@ -18,6 +18,7 @@ import json
 import mimetypes
 import re
 from dataclasses import dataclass
+from pathlib import PurePath
 
 from ..models import Agent, Conversation, Message, MessageAttachment, now_utc
 from .attachments import MAX_ATTACHMENT_BYTES, attachment_kind, store_attachment
@@ -58,10 +59,19 @@ class ToolFile:
 
 
 def _filename_for(mime: str, given: str | None) -> str:
-    if given:
-        return given
+    """A filename that carries the extension the mime implies.
+
+    Tools often name a file without one (``cotizacion``); the extension is what
+    the chat UI and WhatsApp use to classify the document, and Meta refuses an
+    upload whose name does not match its type, so a missing one is added here
+    rather than at every sender."""
     extension = mimetypes.guess_extension(mime.split(";")[0].strip()) or ".bin"
-    return f"file{extension}"
+    given = (given or "").strip()
+    if not given:
+        return f"file{extension}"
+    if not PurePath(given).suffix:
+        return f"{given}{extension}"
+    return given
 
 
 def _decode_base64(value: str) -> bytes | None:

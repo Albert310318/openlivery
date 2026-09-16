@@ -454,9 +454,19 @@ def test_extract_tool_files_strips_bytes():
     assert files[0].data == pdf and files[0].filename == "recibo.pdf" and files[0].mime == "application/pdf"
     assert encoded not in text and "share_url" in text
 
-    # A binary body is the file wholesale.
+    # A name without an extension gets the one the mime implies: the chat UI
+    # and WhatsApp classify the document by it.
+    body = json.dumps({"name": "cotizacion_autos", "mime": "application/pdf", "file": encoded})
+    _text, files = extract_tool_files(200, "application/json", body.encode(), body)
+    assert files[0].filename == "cotizacion_autos.pdf"
+    # A name that already has one is kept as is.
+    body = json.dumps({"filename": "recibo.PDF", "mime": "application/pdf", "file": encoded})
+    _text, files = extract_tool_files(200, "application/json", body.encode(), body)
+    assert files[0].filename == "recibo.PDF"
+
+    # A binary body is the file wholesale, named by its type.
     text, files = extract_tool_files(200, "application/pdf", pdf, "garbled")
-    assert len(files) == 1 and files[0].data == pdf
+    assert len(files) == 1 and files[0].data == pdf and files[0].filename == "file.pdf"
     assert "%PDF" not in text
 
     # A data URL anywhere in the JSON is picked up.
