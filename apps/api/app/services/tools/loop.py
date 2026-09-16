@@ -9,6 +9,7 @@ the loop ends.
 import json
 
 from ..ai import Completion, Usage, _post_json, auth_headers, chat_message, chat_url, completion_from, extract_chat_text, read_usage, sampling_params
+from ..tool_files import MAX_TOOL_FILES
 from .http_exec import execute_http_tool
 from .mcp_client import call_mcp_tool
 from .specs import ToolSpec, find_spec
@@ -17,18 +18,19 @@ MAX_TOOL_ITERATIONS = 5
 RESULT_PREVIEW_CHARS = 500
 
 
-async def _execute(spec: ToolSpec, args: dict) -> tuple[str, bool]:
+async def _execute(spec: ToolSpec, args: dict) -> tuple[str, bool, list]:
+    files: list = []
     if spec.handler is not None:
-        return spec.handler(args)
-    if spec.mcp_tool_name is not None:
+        result, is_error = spec.handler(args)
+    elif spec.mcp_tool_name is not None:
         result, is_error = await call_mcp_tool(spec.tool, spec.mcp_tool_name, args)
     else:
-        result, is_error = await execute_http_tool(spec.tool, args)
+        result, is_error, files = await execute_http_tool(spec.tool, args)
     if is_error:
         # Unambiguous failure marker (the tool message has no error flag) so
         # the no-fallback rule in the system prompt kicks in.
         result = f"Tool call failed: {result}"
-    return result, is_error
+    return result, is_error, files
 
 
 def _record(metadata: list[dict], name: str, args: dict, result: str, is_error: bool) -> None:
@@ -53,6 +55,7 @@ async def tool_loop(
     sampling = sampling_params(temperature, max_tokens)
     usage = Usage()
     metadata: list[dict] = []
+    attachments: list = []
 
     for iteration in range(MAX_TOOL_ITERATIONS + 1):
         payload: dict = {"model": model, "messages": convo, "tools": tools}
@@ -65,7 +68,9 @@ async def tool_loop(
         message = chat_message(data)
         calls = [call for call in (message.get("tool_calls") or []) if call.get("type", "function") == "function"]
         if not calls:
-            return completion_from(extract_chat_text(data), usage, data, tool_calls=metadata or None)
+            completion = completion_from(extract_chat_text(data), usage, data, tool_calls=metadata or None)
+            completion.attachments = attachments
+            return completion
         # The assistant turn that asked for the tools must be echoed back, then
         # one tool message per call, in the same order.
         convo.append({"role": "assistant", "content": message.get("content") or "", "tool_calls": calls})
@@ -77,9 +82,12 @@ async def tool_loop(
                 args = {}
             spec = find_spec(specs, function.get("name", ""))
             if spec is None:
-                result, is_error = f"Error: unknown tool '{function.get('name')}'", True
+                result, is_error, files = f"Error: unknown tool '{function.get('name')}'", True, []
             else:
-                result, is_error = await _execute(spec, args)
+                result, is_error, files = await _execute(spec, args)
+            if files:
+                attachments.extend(files)
+                del attachments[MAX_TOOL_FILES:]
             _record(metadata, function.get("name", ""), args, result, is_error)
             convo.append({"role": "tool", "tool_call_id": call.get("id"), "content": result})
     raise ValueError("tool loop did not converge")

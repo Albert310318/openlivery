@@ -23,7 +23,7 @@ from ..ratelimit import whatsapp_cloud_webhook_rate_limit
 from ..security import decrypt_secret
 from ..services.whatsapp_cloud import fetch_media, send_text
 from ..services.whatsapp_format import markdown_to_whatsapp
-from ..services.whatsapp_inbound import InboundMessage, process_inbound
+from ..services.whatsapp_inbound import InboundMessage, process_inbound, send_reply_attachments
 from ..services.whatsapp_identity import contact_names, peer_id, resolve_peer_contact, user_id
 
 
@@ -259,23 +259,28 @@ async def _handle_message(
         channel.updated_at = now_utc()
         db.commit()
         return
-    if not result.reply or not access_token or not channel.phone_number_id:
+    if not access_token or not channel.phone_number_id:
         return
-    try:
-        wamid = await send_text(
-            access_token,
-            channel.phone_number_id,
-            inbound.external_chat_id,
-            markdown_to_whatsapp(result.reply),
-            context_message_id=result.quote_external_id,
-        )
-    except HTTPException as exc:
-        channel.last_error = f"The reply could not be sent: {exc.detail}"
-        channel.updated_at = now_utc()
-        db.commit()
-        return
-    if wamid and result.outbound_message_id:
-        message = db.get(Message, result.outbound_message_id)
-        if message:
-            message.external_message_id = wamid
+    conversation = db.get(Conversation, result.conversation_id) if result.conversation_id else None
+    if result.reply:
+        try:
+            wamid = await send_text(
+                access_token,
+                channel.phone_number_id,
+                inbound.external_chat_id,
+                markdown_to_whatsapp(result.reply),
+                context_message_id=result.quote_external_id,
+            )
+        except HTTPException as exc:
+            channel.last_error = f"The reply could not be sent: {exc.detail}"
+            channel.updated_at = now_utc()
             db.commit()
+            return
+        if wamid and result.outbound_message_id:
+            message = db.get(Message, result.outbound_message_id)
+            if message:
+                message.external_message_id = wamid
+                db.commit()
+    # Files a tool produced go out as attachments after the text.
+    if conversation and result.attachment_message_ids:
+        await send_reply_attachments(db, conversation, result.attachment_message_ids)

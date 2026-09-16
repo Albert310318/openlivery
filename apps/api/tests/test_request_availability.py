@@ -64,7 +64,7 @@ def test_future_booking_tool_runs_outside_reception_hours(authenticated_client, 
     assert created.status_code == 201, created.text
     requested_time = "2026-09-15T10:00:00-05:00"
     result = "HTTP 409: slot unavailable" if tool_failed else 'HTTP 201: {"booking_id":"A-123","confirmed":true}'
-    endpoint = AsyncMock(return_value=(result, tool_failed))
+    endpoint = AsyncMock(return_value=(result, tool_failed, []))
     monkeypatch.setattr(loop, "execute_http_tool", endpoint)
     reply = "The slot is unavailable." if tool_failed else "Appointment A-123 is booked."
     provider = AsyncMock(side_effect=[

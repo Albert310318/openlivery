@@ -26,7 +26,7 @@ from ..schemas import (
 )
 from ..security import decrypt_secret, encrypt_secret
 from ..services.whatsapp import bridge_command
-from ..services.whatsapp_inbound import InboundMessage, process_inbound
+from ..services.whatsapp_inbound import InboundMessage, process_inbound, send_reply_attachments
 
 
 router = APIRouter(prefix="/whatsapp", tags=["WhatsApp"])
@@ -242,6 +242,13 @@ async def inbound_message(channel_id: uuid.UUID, payload: WhatsAppInbound, db: S
         conversation_channel="whatsapp",
         channel_fk_field="whatsapp_channel_id",
     )
+    # The bridge sends result.reply as text; tool-produced files are sent here as
+    # attachments (only the synchronous path populates these; a debounced reply
+    # sends its own from the timer task).
+    if result.attachment_message_ids and result.conversation_id:
+        conversation = db.get(Conversation, result.conversation_id)
+        if conversation:
+            await send_reply_attachments(db, conversation, result.attachment_message_ids)
     return asdict(result)
 
 

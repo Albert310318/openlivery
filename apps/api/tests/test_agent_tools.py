@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import types
 from unittest.mock import AsyncMock
@@ -10,6 +11,7 @@ from app.models import AgentTool
 from app.routers import agent_tools as agent_tools_router
 from app.security import encrypt_secret
 from app.services import ai as ai_module
+from app.services.tool_files import extract_tool_files
 from app.services.tools import http_exec as http_exec_module
 from app.services.tools.loop import MAX_TOOL_ITERATIONS, tool_loop
 from app.services.tools.specs import build_tool_specs
@@ -257,10 +259,12 @@ class _ScriptedLLM:
 class _FakeToolEndpoint:
     """Fake httpx.AsyncClient for the HTTP tool execution."""
 
-    def __init__(self, captured, status_code=200, body='{"status": "shipped"}'):
+    def __init__(self, captured, status_code=200, body='{"status": "shipped"}', content_type="application/json", content=None):
         self.captured = captured
         self.status_code = status_code
         self.body = body
+        self.content_type = content_type
+        self._content = content
 
     def __call__(self, **kwargs):
         self.captured["client_kwargs"] = kwargs
@@ -278,6 +282,8 @@ class _FakeToolEndpoint:
         class Response:
             status_code = self.status_code
             text = self.body
+            headers = {"content-type": self.content_type}
+            content = self._content if self._content is not None else self.body.encode()
 
         return Response()
 
@@ -384,18 +390,18 @@ def test_http_exec_edge_cases(monkeypatch):
     _allow_all_urls(monkeypatch)
 
     # Missing path parameter.
-    result, is_error = asyncio.run(http_exec_module.execute_http_tool(_http_tool_row(), {}))
+    result, is_error, _files = asyncio.run(http_exec_module.execute_http_tool(_http_tool_row(), {}))
     assert is_error and "order_id" in result
 
     # Non-2xx marks the result as an error but still returns the body.
-    _patch_httpx(monkeypatch, http_exec_module, _FakeToolEndpoint({}, status_code=404, body="not found"))
-    result, is_error = asyncio.run(http_exec_module.execute_http_tool(_http_tool_row(), {"order_id": "9"}))
+    _patch_httpx(monkeypatch, http_exec_module, _FakeToolEndpoint({}, status_code=404, body="not found", content_type="text/plain"))
+    result, is_error, _files = asyncio.run(http_exec_module.execute_http_tool(_http_tool_row(), {"order_id": "9"}))
     assert is_error and result == "HTTP 404: not found"
 
     # Oversized bodies are truncated.
     huge = "x" * (http_exec_module.MAX_RESPONSE_CHARS + 50)
-    _patch_httpx(monkeypatch, http_exec_module, _FakeToolEndpoint({}, body=huge))
-    result, _ = asyncio.run(http_exec_module.execute_http_tool(_http_tool_row(), {"order_id": "9"}))
+    _patch_httpx(monkeypatch, http_exec_module, _FakeToolEndpoint({}, body=huge, content_type="text/plain"))
+    result, _is_error, _files = asyncio.run(http_exec_module.execute_http_tool(_http_tool_row(), {"order_id": "9"}))
     assert result.endswith("... [truncated]")
     assert len(result) < len(huge)
 
@@ -414,7 +420,7 @@ def test_http_exec_edge_cases(monkeypatch):
             raise http_exec_module.httpx.ReadTimeout("slow")
 
     _patch_httpx(monkeypatch, http_exec_module, ExplodingClient())
-    result, is_error = asyncio.run(http_exec_module.execute_http_tool(_http_tool_row(), {"order_id": "9"}))
+    result, is_error, _files = asyncio.run(http_exec_module.execute_http_tool(_http_tool_row(), {"order_id": "9"}))
     assert is_error and "ReadTimeout" in result
 
 
@@ -425,15 +431,79 @@ def test_ssrf_guard(monkeypatch):
         return [(2, 1, 6, "", ("169.254.169.254", 0))]
 
     monkeypatch.setattr(http_exec_module.socket, "getaddrinfo", fake_getaddrinfo)
-    result, is_error = asyncio.run(http_exec_module.execute_http_tool(row, {"order_id": "1"}))
+    result, is_error, _files = asyncio.run(http_exec_module.execute_http_tool(row, {"order_id": "1"}))
     assert is_error and "private or reserved" in result
 
     # Self-hosted opt-out lets the request through.
     settings = http_exec_module.get_settings().model_copy(update={"tools_allow_private_urls": True})
     monkeypatch.setattr(http_exec_module, "get_settings", lambda: settings)
     _patch_httpx(monkeypatch, http_exec_module, _FakeToolEndpoint({}))
-    result, is_error = asyncio.run(http_exec_module.execute_http_tool(row, {"order_id": "1"}))
+    result, is_error, _files = asyncio.run(http_exec_module.execute_http_tool(row, {"order_id": "1"}))
     assert not is_error
+
+
+def test_extract_tool_files_strips_bytes():
+    pdf = b"%PDF-1.4" + b"0" * 5000
+    encoded = base64.b64encode(pdf).decode()
+
+    # A base64 file field in a JSON body: bytes come out, everything else stays.
+    body = json.dumps({"status": "ok", "filename": "recibo.pdf", "mime": "application/pdf",
+                       "file": encoded, "share_url": "https://x/y"})
+    text, files = extract_tool_files(200, "application/json", body.encode(), body)
+    assert len(files) == 1
+    assert files[0].data == pdf and files[0].filename == "recibo.pdf" and files[0].mime == "application/pdf"
+    assert encoded not in text and "share_url" in text
+
+    # A binary body is the file wholesale.
+    text, files = extract_tool_files(200, "application/pdf", pdf, "garbled")
+    assert len(files) == 1 and files[0].data == pdf
+    assert "%PDF" not in text
+
+    # A data URL anywhere in the JSON is picked up.
+    data_url = "data:image/png;base64," + base64.b64encode(b"\x89PNG" + b"1" * 4000).decode()
+    body = json.dumps({"result": {"img": data_url}})
+    text, files = extract_tool_files(200, "application/json", body.encode(), body)
+    assert len(files) == 1 and files[0].mime == "image/png" and "base64" not in text
+
+
+def test_extract_tool_files_leaves_plain_responses():
+    # Plain JSON without a file is untouched.
+    body = json.dumps({"status": "shipped"})
+    assert extract_tool_files(200, "application/json", body.encode(), body) == (body, [])
+    # Plain text is untouched.
+    assert extract_tool_files(200, "text/plain", b"hello", "hello") == ("hello", [])
+    # A short base64-looking id is not a file.
+    body = json.dumps({"data": "YWJjZGVm"})
+    assert extract_tool_files(200, "application/json", body.encode(), body) == (body, [])
+
+
+def test_tool_loop_keeps_file_bytes_out_of_context(monkeypatch):
+    specs = build_tool_specs([_http_tool_row()])
+    pdf = b"%PDF-1.4" + b"0" * 5000
+    encoded = base64.b64encode(pdf).decode()
+    tool_body = json.dumps({"filename": "recibo.pdf", "mime": "application/pdf", "file": encoded})
+    llm_calls: list[dict] = []
+    _patch_httpx(monkeypatch, ai_module, _ScriptedLLM([
+        _tool_call_reply("call_1", "check_order", '{"order_id": "42"}'),
+        _text_reply("Here is your receipt."),
+    ], llm_calls))
+    _patch_httpx(monkeypatch, http_exec_module, _FakeToolEndpoint({}, body=tool_body))
+    _allow_all_urls(monkeypatch)
+
+    completion = asyncio.run(tool_loop(
+        "https://openrouter.test/api/v1", "key", "openai/gpt-5.6-luna",
+        [{"role": "user", "content": "Send me my receipt"}], specs, None, None,
+    ))
+
+    # The tool message the model saw never carried the base64 payload.
+    tool_message = llm_calls[1]["payload"]["messages"][-1]
+    assert tool_message["role"] == "tool"
+    assert encoded not in tool_message["content"]
+    assert "recibo.pdf" in tool_message["content"]
+    # The file rode out on the completion for the channel layer to deliver.
+    assert len(completion.attachments) == 1
+    assert completion.attachments[0].data == pdf
+    assert completion.text == "Here is your receipt."
 
 
 def test_conversation_uses_tools_end_to_end(authenticated_client: TestClient, monkeypatch):

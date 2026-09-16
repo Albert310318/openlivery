@@ -5,7 +5,7 @@ is what OpenRouter speaks for all vendors. The usage block it returns carries
 the cost of the call, so a reply knows what it cost without a price table.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 from fastapi import HTTPException
@@ -57,6 +57,10 @@ class Completion:
     # The router's id for the call, to read its record later when the
     # response left the cost out (speech-to-text does).
     generation_id: str = ""
+    # Files an HTTP tool returned during the loop (list[tool_files.ToolFile]).
+    # Their bytes never entered the model context; the channel layer delivers
+    # them as attachments after the text reply.
+    attachments: list = field(default_factory=list)
 
 
 # Substrings in a provider's 400 error that mean a sampling parameter is not

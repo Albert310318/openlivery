@@ -14,22 +14,28 @@ import httpx
 from ...config import get_settings
 from ...models import AgentTool
 from ...security import decrypt_secret
+from ..tool_files import ToolFile, extract_tool_files
 from .specs import path_placeholders
 
 MAX_RESPONSE_CHARS = 100_000
 
 
-async def execute_http_tool(tool: AgentTool, args: dict) -> tuple[str, bool]:
-    """Run the tool and return (result_text, is_error)."""
+async def execute_http_tool(tool: AgentTool, args: dict) -> tuple[str, bool, list[ToolFile]]:
+    """Run the tool and return (result_text, is_error, files).
+
+    ``files`` are any file the response carried (a PDF, an image): their bytes are
+    stripped from ``result_text`` so they never reach the model, and the caller
+    delivers them as channel attachments instead.
+    """
     url = tool.url
     for name in path_placeholders(tool.url):
         if name not in args:
-            return f"Error: missing required path parameter '{name}'", True
+            return f"Error: missing required path parameter '{name}'", True, []
         url = url.replace("{" + name + "}", quote(str(args[name]), safe=""))
 
     blocked = _blocked_reason(url)
     if blocked:
-        return blocked, True
+        return blocked, True, []
 
     query_names = {param.get("name") for param in tool.query_params or []}
     params = {key: value for key, value in args.items() if key in query_names}
@@ -41,7 +47,7 @@ async def execute_http_tool(tool: AgentTool, args: dict) -> tuple[str, bool]:
         try:
             headers = json.loads(decrypt_secret(tool.encrypted_headers))
         except Exception:
-            return "Error: the tool's stored headers could not be decrypted", True
+            return "Error: the tool's stored headers could not be decrypted", True, []
 
     request: dict = {"params": params or None, "headers": headers or None}
     if tool.http_method in ("POST", "PUT", "PATCH"):
@@ -51,14 +57,17 @@ async def execute_http_tool(tool: AgentTool, args: dict) -> tuple[str, bool]:
         async with httpx.AsyncClient(timeout=tool.timeout_seconds, follow_redirects=False) as client:
             response = await client.request(tool.http_method, url, **request)
     except httpx.HTTPError as exc:
-        return f"Error: the request failed ({type(exc).__name__})", True
+        return f"Error: the request failed ({type(exc).__name__})", True, []
 
-    text = response.text
+    content_type = response.headers.get("content-type", "")
+    # Pull any file out before the body is turned into model-visible text, so its
+    # bytes never enter the tool result the LLM reads.
+    text, files = extract_tool_files(response.status_code, content_type, response.content, response.text)
     if len(text) > MAX_RESPONSE_CHARS:
         text = text[:MAX_RESPONSE_CHARS] + "... [truncated]"
     # Redirects (3xx) count as failures: they are never followed, so the data
     # was not retrieved.
-    return f"HTTP {response.status_code}: {text}", response.status_code >= 300
+    return f"HTTP {response.status_code}: {text}", response.status_code >= 300, files
 
 
 def _blocked_reason(url: str) -> str | None:

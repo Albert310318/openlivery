@@ -9,7 +9,7 @@ taken over. The caller is responsible for actually delivering the reply.
 import asyncio
 import random
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from fastapi import HTTPException
@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..database import new_session
 from .contacts import display_name, phone_from_chat_id, previous_conversation_recap, rename_conversations, resolve_contact
 from .conversation_state import exchanged_only, note_inbound, note_reply
-from ..models import Agent, Conversation, Message, now_utc
+from ..models import Agent, Conversation, Message, MessageAttachment, now_utc
 from .attachments import llm_text, store_attachment
 from .knowledge import contact_context, build_system_prompt, llm_turns, retrieve_knowledge
 from .media import audio_filename, describe_image, transcribe_audio
@@ -36,7 +36,7 @@ from .escalation import (
     escalation_enabled,
     escalation_prompt,
 )
-from .whatsapp import deliver_reaction, send_channel_message, signal_channel_read
+from .whatsapp import deliver_reaction, send_channel_media, send_channel_message, signal_channel_read
 from .whatsapp_format import parse_reply_directives
 from .whatsapp_identity import resolve_peer_contact
 
@@ -65,6 +65,9 @@ class InboundResult:
     outbound_message_id: uuid.UUID | None = None
     # External id of the visitor message the reply quotes (swipe-to-reply).
     quote_external_id: str | None = None
+    # Message ids of files a tool produced, to send as WhatsApp attachments after
+    # the text reply. Social channels queue their own inside _reply_with_ai.
+    attachment_message_ids: list[str] = field(default_factory=list)
 
 
 def _media_placeholder(kind: str) -> str:
@@ -501,6 +504,18 @@ async def _reply_with_ai(db: Session, channel, conversation: Conversation, retri
         if conversation.channel in ("instagram", "messenger"):
             from .social_delivery import queue_message
             queue_message(db, conversation, outbound)
+    # Files a tool returned ride out as attachments, never as text to the model.
+    attachment_message_ids: list[str] = []
+    tool_files = getattr(completion, "attachments", None) or []
+    if tool_files:
+        from .tool_files import persist_reply_files
+        stored = persist_reply_files(db, conversation, agent, tool_files)
+        if conversation.channel in ("instagram", "messenger"):
+            from .social_delivery import queue_message
+            for media, attachment in stored:
+                queue_message(db, conversation, media, attachment=attachment)
+        else:
+            attachment_message_ids = [str(media.id) for media, _ in stored]
     record_usage(db, agent.agency_id, agent.id, agent.provider, agent.model.strip(), completion, conversation=conversation, message=outbound)
     conversation.updated_at = now_utc()
     channel.last_error = None
@@ -527,7 +542,32 @@ async def _reply_with_ai(db: Session, channel, conversation: Conversation, retri
         mode=conversation.mode,
         outbound_message_id=outbound.id if outbound else None,
         quote_external_id=quote_external_id,
+        attachment_message_ids=attachment_message_ids,
     )
+
+
+async def send_reply_attachments(db: Session, conversation: Conversation, message_ids: list[str]) -> None:
+    """Send tool-produced files as attachments on a WhatsApp channel, after the
+    text reply has gone out. A no-op for channels without direct byte delivery
+    (social channels queue their own; the widget and playground surface them
+    through the stored messages)."""
+    if not message_ids or conversation.channel not in ("whatsapp", "whatsapp_cloud"):
+        return
+    for message_id in message_ids:
+        attachment = db.scalar(select(MessageAttachment).where(MessageAttachment.message_id == uuid.UUID(message_id)))
+        if not attachment:
+            continue
+        try:
+            external_id = await send_channel_media(
+                db, conversation, kind=attachment.kind, data=attachment.data, mime=attachment.mime, filename=attachment.filename,
+            )
+        except HTTPException:
+            continue
+        if external_id:
+            message = db.get(Message, uuid.UUID(message_id))
+            if message:
+                message.external_message_id = external_id
+    db.commit()
 
 
 _pending_replies: dict[uuid.UUID, "asyncio.Task[None]"] = {}
@@ -611,6 +651,8 @@ async def _debounced_reply(conversation_id: uuid.UUID, delay: float) -> None:
             db.commit()
             return
         if not result.reply:
+            # A tool may have produced a file with no accompanying text.
+            await send_reply_attachments(db, conversation, result.attachment_message_ids)
             return
         try:
             external_id = await send_channel_message(
@@ -626,5 +668,6 @@ async def _debounced_reply(conversation_id: uuid.UUID, delay: float) -> None:
             if outbound:
                 outbound.external_message_id = external_id
                 db.commit()
+        await send_reply_attachments(db, conversation, result.attachment_message_ids)
     finally:
         db.close()

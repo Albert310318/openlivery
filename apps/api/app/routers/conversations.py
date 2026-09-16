@@ -267,6 +267,11 @@ async def _generate_reply(
     )
     db.add(reply)
     record_usage(db, agent.agency_id, agent.id, agent.provider, agent.model.strip(), completion, conversation=conversation, message=reply)
+    if completion.attachments:
+        # Files a tool returned are stored as their own assistant messages so the
+        # playground shows them as document cards.
+        from ..services.tool_files import persist_reply_files
+        persist_reply_files(db, conversation, agent, completion.attachments)
     conversation.updated_at = now_utc()
     db.commit()
     return _conversation(db, user, conversation.id)
