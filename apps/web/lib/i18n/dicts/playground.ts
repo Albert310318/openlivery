@@ -60,7 +60,7 @@ const es: typeof en = {
   page: {
     eyebrow: "Laboratorio",
     title: "Playground",
-    description: "Conversa con tus agentes y valida sus respuestas antes de publicarlos.",
+    description: "Conversa con tus agentes y valida sus respuestas antes de publicar los agentes.",
   },
   selectors: {
     client: "Cliente",

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { FileText, MessageSquareText, SlidersHorizontal, Tag, Users } from "lucide-react";
 import { PreferencesSection } from "@/components/preferences-section";
+import { SectionTabs, type SectionTab } from "@/components/section-tabs";
 import { useT } from "@/lib/i18n";
 import { CannedRepliesView } from "./canned";
 import { TagsView } from "./tags";
@@ -18,14 +19,17 @@ export function SettingsView({ slug, templatesSupported, can }: { slug: string; 
   const t = useT();
   const [tab, setTab] = useState<Tab>("preferences");
   const base = `/portal/${slug}`;
+  // The same tabs as before; SectionTabs keeps the strip on a desktop and
+  // pages through them on a phone. A tab the role cannot manage is left out.
+  const tabs: SectionTab<Tab>[] = [
+    { id: "preferences", label: t("settings.preferences.heading"), icon: SlidersHorizontal },
+    ...(can("teams.manage") ? [{ id: "teams" as const, label: t("portal.inbox.nav.teams"), icon: Users }] : []),
+    ...(can("tags.manage") ? [{ id: "tags" as const, label: t("portal.contacts.tags.manageTitle"), icon: Tag }] : []),
+    ...(can("canned.manage") ? [{ id: "canned" as const, label: t("portal.canned.manageTitle"), icon: MessageSquareText }] : []),
+    ...(can("templates.manage") ? [{ id: "templates" as const, label: t("portal.inbox.nav.templates"), icon: FileText }] : []),
+  ];
   return <div className="portal-settings">
-    <nav className="tabs">
-      <button className={tab === "preferences" ? "active" : ""} onClick={() => setTab("preferences")}><SlidersHorizontal size={16} /> {t("settings.preferences.heading")}</button>
-      {can("teams.manage") && <button className={tab === "teams" ? "active" : ""} onClick={() => setTab("teams")}><Users size={16} /> {t("portal.inbox.nav.teams")}</button>}
-      {can("tags.manage") && <button className={tab === "tags" ? "active" : ""} onClick={() => setTab("tags")}><Tag size={16} /> {t("portal.contacts.tags.manageTitle")}</button>}
-      {can("canned.manage") && <button className={tab === "canned" ? "active" : ""} onClick={() => setTab("canned")}><MessageSquareText size={16} /> {t("portal.canned.manageTitle")}</button>}
-      {can("templates.manage") && <button className={tab === "templates" ? "active" : ""} onClick={() => setTab("templates")}><FileText size={16} /> {t("portal.inbox.nav.templates")}</button>}
-    </nav>
+    <SectionTabs<Tab> tabs={tabs} value={tab} onChange={setTab} />
     {tab === "preferences" && <PreferencesSection />}
     {tab === "teams" && can("teams.manage") && <TeamsView base={base} canManage />}
     {tab === "tags" && can("tags.manage") && <TagsView base={`${base}/tags`} canManage />}

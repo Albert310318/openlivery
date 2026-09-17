@@ -11,6 +11,7 @@
    line. The *-rgb triplets feed rgba() rings and shadows. */
 :root {
   --canvas: #f7f9fa;
+  --canvas-rgb: 247, 249, 250;
   --surface: #ffffff;
   --surface-2: #fafbfc;
   --surface-3: #f1f2f5;
@@ -74,6 +75,7 @@
 
 :root[data-theme="dark"] {
   --canvas: #0d1220;
+  --canvas-rgb: 13, 18, 32;
   --surface: #141a2a;
   --surface-2: #19202f;
   --surface-3: #1f2738;
@@ -774,6 +776,10 @@ textarea { line-height: 1.55; }
 .portal-composer.window-closed { align-items: center; justify-content: space-between; gap: 16px; background: var(--amber-soft); }
 .portal-composer.window-closed > div { display: flex; flex-direction: column; gap: 2px; }
 .portal-composer.window-closed small { color: var(--amber-text); }
+/* Resolved and archived are closed, settled states, not warnings: the bar
+   that marks them is green. The WhatsApp window-closed bar keeps its amber. */
+.portal-composer.window-closed.archive-bar { border-top-color: var(--green-line); background: var(--green-soft); }
+.portal-composer.window-closed.archive-bar strong { color: var(--green-text); }
 .portal-composer.window-closed .button { width: auto; min-height: 38px; padding: 0 16px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; flex: 0 0 auto; }
 .portal-templates { padding: 4px 0; }
 .portal-templates-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
@@ -2204,3 +2210,252 @@ html[data-theme-transition], html[data-theme-transition] *, html[data-theme-tran
 :root[data-theme="dark"] .rich-text code { background: rgba(255, 255, 255, .08); }
 :root[data-theme="dark"] .portal-composer.window-closed { border-top-color: var(--amber-line); }
 :root[data-theme="dark"] .portal-composer.window-closed strong { color: var(--amber-text); }
+:root[data-theme="dark"] .portal-composer.window-closed.archive-bar { border-top-color: var(--green-line); background: var(--green-soft); }
+:root[data-theme="dark"] .portal-composer.window-closed.archive-bar strong { color: var(--green-text); }
+
+/* Phone layout corrections.
+
+   Two distinct problems, both invisible on a desktop viewport. The shell's menu
+   button is fixed, so page content scrolled underneath it and came out from
+   behind it mid-word; the scrim below hides content before it reaches the
+   button. The rest are intrinsic-width floors: a handful of rows kept their
+   desktop minimum on a phone, and because a grid or flex track never shrinks
+   below its content's minimum, each one pushed its own card wider than the
+   card had room for. */
+@media (max-width: 850px) {
+  /* Fades content out under the fixed menu button. At rest this is the page
+     canvas drawn over the page canvas, so nothing shows until content scrolls
+     up into it. Below .mobile-menu (18) and the sidebar overlay (19). */
+  .app-layout::before {
+    content: "";
+    height: 72px;
+    position: fixed;
+    z-index: 17;
+    top: 0;
+    left: 0;
+    right: 0;
+    pointer-events: none;
+    background: linear-gradient(rgba(var(--canvas-rgb), 1) 55%, rgba(var(--canvas-rgb), 0));
+  }
+}
+@media (max-width: 640px) {
+  /* The cell is already built to truncate: its text column is min-width: 0 and
+     the secondary label ellipsizes. The 220px floor was the reason it never
+     got to, which forced the table into horizontal scroll and cut the last
+     columns off screen. */
+  .entity-cell { min-width: 0; }
+  /* With two columns hidden, the desktop gutter is 108px of a ~325px row, which
+     on its own is enough to push the row back into horizontal scroll. Narrower
+     here so the remaining columns fit without shortening any name. */
+  .data-table th, .data-table td { padding-left: 12px; padding-right: 12px; }
+}
+@media (max-width: 620px) {
+  .form-section, .settings-section { padding: 20px; }
+  /* An input beside its buttons has a ~300px intrinsic minimum, wider than the
+     content box of the card holding it. Let the buttons take their own row. */
+  .domain-input, .domain-actions, .key-configured-actions { flex-wrap: wrap; }
+  .domain-input > input { min-width: 0; flex: 1 1 100%; }
+  /* Long TXT values stay scrollable instead of widening the card. */
+  .dns-instructions { overflow-x: auto; }
+  /* A 1fr track never shrinks below its content's minimum, and a status row
+     whose text will not wrap has a minimum wider than the card, so the grid
+     grew past its card and the page scrolled sideways. minmax(0, 1fr) lets
+     the track shrink, and the text column is allowed to wrap into it. */
+  .form-grid { grid-template-columns: minmax(0, 1fr); }
+  .form-grid > * { min-width: 0; }
+  .switch-row > span { min-width: 0; }
+  .switch-row strong, .switch-row small, .switch-row code { white-space: normal; overflow-wrap: anywhere; }
+  /* A URL is one word with no break opportunity. Beside its two actions it
+     set the row's minimum at ~340px, wider than the card, which is what
+     dragged the whole page sideways. The URL takes its own line, on one line
+     with an ellipsis, and the actions follow underneath. */
+  .url-preview { flex-wrap: wrap; row-gap: 10px; }
+  .url-preview code { flex: 1 1 100%; min-width: 0; white-space: nowrap; }
+  /* A panel head puts its description and its actions on one row. At this
+     width neither side gets enough of it: the description was wrapping to
+     about 130px of a 325px row, five short lines deep, while the buttons
+     stacked on top of each other beside it. Stacked, the description reads
+     across the full width and the buttons sit side by side under it. */
+  .panel-head { flex-direction: column; align-items: stretch; gap: 12px; }
+}
+
+/* Phone layout, second pass.
+
+   Everything below restates a rule that already exists for phones earlier in
+   this file but never takes effect. Media queries add no specificity, so a
+   later top-level rule beats an earlier rule inside a @media block: the mobile
+   values at lines ~328 lose to the "2026 redesign" section that follows them.
+   This block sits at the end of the file, so it is the one that wins. Where a
+   value here differs from the earlier mobile rule, it is because the earlier
+   value was written for a layout that has since changed. */
+/* The pager half of components/section-tabs.tsx. Off until the phone rule
+   below turns it on; declared before that rule so source order agrees with
+   the intent. */
+.section-pager { display: none; }
+@media (max-width: 850px) {
+  /* 100vh counts the strip behind the browser's own chrome, so a screen-height
+     box ends below what the phone actually shows and its last rows cannot be
+     scrolled to. dvh measures what is visible. */
+  .app-layout, .main-content { min-height: 100dvh; }
+  /* The menu button ends at 56px and the scrim at 72px; content used to start
+     at 78px, which read as a dead band under the button. Start it where the
+     scrim ends. */
+  .page { padding-top: 72px; }
+}
+@media (max-width: 620px) {
+  /* Filter rows: the 240px wrapper floor and the 190px select floor left two
+     controls at slightly different widths inside a ~330px row, which is what
+     made them look misaligned. Full width, so they line up with each other and
+     with the search box. Covers the inbox, agents and reports toolbars. */
+  .toolbar.filters { width: 100%; }
+  /* Label above the control, not beside it: side by side, a longer label ate
+     more of the row, so two filters in the same toolbar ended up different
+     widths and started at different left edges. Stacked, every control is the
+     full row and they line up. This is what the reports filters already do. */
+  .filter-select { min-width: 0; width: 100%; flex-direction: column; align-items: stretch; gap: 4px; }
+  .filter-select select { min-width: 0; width: 100%; flex: 1 1 auto; }
+
+  /* Playground. The escape hatch at the 620px block above is defeated by the
+     later top-level `height: 100vh`, which left the page locked to screen
+     height with `overflow: hidden`, so the composer sat outside the visible
+     area. Height comes from the viewport instead, and the conversation pane is
+     capped so the chat keeps the larger share. */
+  .playground-page { height: auto; overflow: visible; }
+  .playground-layout, .playground-layout.embedded {
+    height: calc(100dvh - 210px);
+    min-height: 480px;
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 200px) minmax(0, 1fr);
+  }
+  .conversation-sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+  /* Also restated: the desktop gutter is min(5vw, 60px) a side. */
+  .messages { padding: 18px 14px; }
+  /* Three attachment buttons at desktop size left the message box 99px of a
+     301px composer, too narrow to show its own placeholder. */
+  .composer { gap: 5px; padding-left: 9px; }
+  .composer button { width: 32px; height: 32px; }
+  .composer textarea { min-width: 0; }
+
+  /* The agent wizard's five step pills wrapped 2 + 2 + 1 at this width; the
+     inline pager in the wizard takes over (it shares the .section-pager look).
+     Template cards read as one column; two left 130px cards with the copy
+     broken every other word. */
+  .wizard-steps { display: none; }
+  .template-grid { grid-template-columns: 1fr; }
+
+  /* Entity header actions (publish, open playground, new agent) sat in a row
+     that no longer fit beside the title on a phone; they stack full width. */
+  .header-actions { width: 100%; flex-direction: column; }
+  .header-actions .button { width: 100%; justify-content: center; }
+
+  /* Section tabs: the strip gives way to the pager (components/section-tabs). */
+  .section-tabs { display: none; }
+  .section-pager { margin: 22px 0 18px; padding: 6px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+  .section-pager-current { min-width: 0; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--ink); font-size: 14px; font-weight: 600; }
+  .section-pager-current strong { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .section-pager-current span { padding: 2px 6px; color: var(--muted); background: var(--surface-3); border-radius: 9px; font-size: 12px; }
+  .section-pager-current small { color: var(--subtle); font-size: 12px; font-weight: 600; }
+  .section-pager button { width: 40px; height: 40px; padding: 0; display: grid; place-items: center; }
+  .section-pager button:disabled { opacity: .35; }
+
+  /* Inbox status pills crowded to the left and could overflow their row. They
+     now share the width evenly, the same treatment the portal inbox already
+     has (that rule is scoped to .portal-inbox, so it never reached here). */
+  .inbox-tabs { overflow-x: auto; scrollbar-width: none; }
+  .inbox-tabs::-webkit-scrollbar { display: none; }
+  .inbox-tabs button { flex: 1 1 0; min-width: 0; padding: 5px 8px; justify-content: center; white-space: nowrap; }
+
+  /* A 760px box is taller than a phone screen, and the shell clips, so the
+     thread and its composer fell outside it. Sized to the viewport instead,
+     and the list and the thread take turns in it rather than splitting it:
+     stacked, the list kept the top 190px and the thread showed up cramped
+     underneath it. The list is the screen until a conversation is picked,
+     then the thread is, with a way back in its header. */
+  .inbox-layout { height: calc(100dvh - 170px); min-height: 460px; grid-template-rows: minmax(0, 1fr); }
+  .inbox-layout:not(.has-thread) .inbox-thread { display: none; }
+  .inbox-layout.has-thread .inbox-list { display: none; }
+  /* Two selectors deep on purpose: the top-level rule below that hides the
+     control has one, so this one wins here whatever the source order. */
+  .inbox-layout .inbox-back { display: grid; flex: 0 0 auto; }
+  .inbox-layout .inbox-thread header { gap: 10px; }
+  .inbox-layout .inbox-thread header > div:not(.thread-actions) { flex: 1; min-width: 0; }
+  /* With a conversation open, the thread is the screen: the page title and
+     the filter row above it are put away, and the thread takes the height
+     that leaves the composer on screen without scrolling. Going back brings
+     them back. 124px is the page's own top and bottom padding at this width. */
+  .page:has(> .inbox-layout.has-thread) > :not(.inbox-layout) { display: none; }
+  .page:has(> .inbox-layout.has-thread) > .inbox-layout { height: calc(100dvh - 124px); min-height: 0; }
+}
+/* The back control only means something on a phone. */
+.inbox-back { display: none; }
+
+/* Client portal on a phone. The side nav was a fixed 230px column that took
+   most of the screen; it becomes a bottom tab bar with the four links, and
+   the availability switch plus sign-out move to the top of Settings (the
+   .portal-foot-mobile copy, hidden on a desktop). Inbox and Contacts split
+   the height between list and detail before; now the list is the screen until
+   something is picked, then the detail is, with a way back in its header. */
+.portal-foot-mobile { display: none; }
+/* The reports filter toggle is a phone control too; the 640px rule below
+   turns it on. Without this line it rendered on a desktop as a bare button. */
+.portal-filters-toggle { display: none; }
+@media (max-width: 850px) {
+  .portal-app { grid-template-columns: 1fr; }
+  .portal-nav { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); flex-direction: row; border-right: 0; border-top: 1px solid var(--line); background: var(--surface); box-shadow: 0 -4px 16px rgba(var(--shadow-rgb), calc(.06 * var(--shadow-k))); }
+  .portal-nav .portal-brand, .portal-nav > .portal-nav-foot { display: none; }
+  .portal-nav nav { width: 100%; padding: 0; flex-direction: row; gap: 4px; }
+  .portal-nav nav a { position: relative; flex: 1 1 0; height: 50px; padding: 0 4px; flex-direction: column; justify-content: center; gap: 3px; font-size: 11px; font-weight: 600; }
+  .portal-nav nav a .nav-count { position: absolute; top: 4px; right: calc(50% - 24px); margin: 0; }
+  /* Bottom padding is the tab bar (63px) plus a small cushion, no more: the
+     inbox and contacts cards are sized to end just above the bar. */
+  .portal-main { padding: 18px 14px calc(72px + env(safe-area-inset-bottom)); }
+  .portal-main > header { margin-bottom: 14px; flex-direction: column; align-items: flex-start; gap: 6px; }
+  .portal-foot-mobile { display: block; margin: 0 0 16px; }
+  .portal-foot-mobile .portal-nav-foot { margin: 0; padding: 0; border: 0; flex-direction: row; align-items: center; gap: 8px; }
+  .portal-foot-mobile .availability-toggle { flex: 1 1 auto; min-width: 0; }
+  .portal-foot-mobile .portal-nav-foot > button:not(.availability-toggle) { height: 44px; padding: 0 12px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 8px; }
+}
+@media (max-width: 640px) {
+  /* 150px is what sits above and below the card: the page's top padding and
+     one-line header (76px) and the tab bar with its cushion (74px). Measured:
+     the card ends about 10px above the bar. dvh for the same reason as
+     everywhere else. The 190px/1fr split from the earlier rule is undone. */
+  .portal-inbox, .portal-contacts { height: calc(100dvh - 150px); min-height: 420px; grid-template-rows: minmax(0, 1fr); }
+  .portal-inbox:not(.has-thread) > section { display: none; }
+  .portal-inbox.has-thread > aside { display: none; }
+  .portal-contacts:not(.has-detail) > section { display: none; }
+  .portal-contacts.has-detail > aside { display: none; }
+  .portal-inbox .inbox-back, .portal-contacts .inbox-back { display: grid; flex: 0 0 auto; }
+  /* Thread head: back control and name on the first row, the actions (team
+     picker, take over, archive, gallery) on a row of their own underneath.
+     With everything on one row the name was centred between the two ends
+     and the actions spilled onto a second line at the right. */
+  .portal-inbox > section > header, .portal-contacts > section > header { flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+  .portal-inbox > section > header > div:not(.thread-actions), .portal-contacts > section > header > div:not(.thread-actions) { flex: 1 1 0; min-width: 0; }
+  /* The actions box dissolves into the header row (display: contents) so its
+     items can be placed one by one: the icon-only ones (gallery) go to the
+     right end of the first row, next to the name; anything with a label
+     (archive, take over, the team picker) takes a full row of its own under
+     it. Before, all of them sat in one left-aligned second row. */
+  .portal-inbox > section > header > .thread-actions { display: contents; }
+  .portal-inbox > section > header > .thread-actions > .icon-button { order: 0; margin-left: auto; flex: 0 0 auto; }
+  .portal-inbox > section > header > .thread-actions > :not(.icon-button) { order: 1; flex: 1 1 100%; min-height: 40px; margin: 0; justify-content: center; }
+  .portal-inbox > section > header > .thread-actions > .assignee-picker { display: flex; align-items: center; gap: 8px; }
+  .portal-inbox > section > header > .thread-actions > .assignee-picker select { flex: 1; min-width: 0; }
+  /* The resolved / archived bar under a closed thread is one line now. */
+  .portal-composer.archive-bar { padding: 10px 14px; }
+  /* Reports: four range buttons in one row wrapped "Last 7 / days"; a 2 x 2
+     grid keeps each label whole, and the three selects stack full width. */
+  .report-filters { flex-direction: column; align-items: stretch; gap: 10px; }
+  /* The filters fold behind this toggle on a phone, the same as the agency's
+     reports, so the figures come first. */
+  .portal-filters-toggle { width: 100%; min-height: 44px; margin-bottom: 12px; padding: 0 14px; display: flex; align-items: center; gap: 8px; color: var(--ink); border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); font-size: 14px; font-weight: 600; text-align: left; }
+  .portal-filters-toggle > span { flex: 1; }
+  .portal-filters-toggle .chevron { transition: transform .18s ease; }
+  .portal-filters-toggle .chevron.open { transform: rotate(180deg); }
+  .report-filters.folded { display: none; }
+  .report-ranges { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .report-ranges button { white-space: nowrap; }
+  .report-selects { width: 100%; display: grid; grid-template-columns: 1fr; gap: 8px; }
+  .report-selects select { width: 100%; }
+}

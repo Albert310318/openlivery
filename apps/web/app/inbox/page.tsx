@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Images, Inbox as InboxIcon, LoaderCircle, Search, UserRound } from "lucide-react";
+import { ArrowLeft, Images, Inbox as InboxIcon, LoaderCircle, Search, UserRound } from "lucide-react";
 import { PageHead } from "@/components/ui";
 import { AttachButton, MessageAttachments, PendingAttachment, RecordButton, useFileDrop, type GalleryImage } from "@/components/attachments";
 import { MediaPanel } from "@/components/media-panel";
@@ -220,7 +220,9 @@ export default function InboxPage() {
       <div className="filter-select"><span>{t("inbox.filterChannel")}</span><select aria-label={t("inbox.filterChannel")} value={channel} onChange={(e) => setChannel(e.target.value)}><option value="">{t("inbox.allChannels")}</option>{INBOX_CHANNELS.map((value) => <option key={value} value={value}>{channelLabel(value)}</option>)}</select></div>
     </div>
 
-    <div className="inbox-layout">
+    {/* On a phone the list and the thread take turns on screen (see the
+        .has-thread rules); a desktop shows both side by side and ignores it. */}
+    <div className={`inbox-layout${selected ? " has-thread" : ""}`}>
       <aside className="inbox-list" onScroll={onScroll}>
         <div className="inbox-search"><Search size={16} /><input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder={t("inbox.searchPlaceholder")} /></div>
         <div className="inbox-tabs">
@@ -254,6 +256,7 @@ export default function InboxPage() {
         {!selected ? <div className="empty-state"><div className="empty-icon"><InboxIcon /></div><h3>{t("inbox.empty")}</h3><p>{t("inbox.selectPrompt")}</p></div>
           : <>
             <header>
+              <button type="button" className="icon-button inbox-back" onClick={() => { selectedIdRef.current = null; setSelected(null); }} aria-label={t("common.back")} title={t("common.back")}><ArrowLeft size={16} /></button>
               <div><strong>{selected.contact_name || selected.title}</strong><small>{channelLabel(selected.channel)}</small></div>
               <div className="thread-actions">
                 <button className="icon-button" onClick={() => setMediaOpen(true)} title={t("chat.sharedContent")} aria-label={t("chat.sharedContent")}><Images size={16} /></button>

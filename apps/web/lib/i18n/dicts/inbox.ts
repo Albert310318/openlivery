@@ -58,7 +58,7 @@ const es: typeof en = {
   count: "{count} conversaciones",
   empty: "Sin conversaciones",
   noMessages: "Aún sin mensajes",
-  searchPlaceholder: "Buscar un chat…",
+  searchPlaceholder: "Buscar conversación…",
   tabAll: "Todas",
   tabUnread: "No leídas",
   emptyHint: "Las conversaciones del playground y los canales aparecerán aquí.",
@@ -73,7 +73,7 @@ const es: typeof en = {
   composerLocked: "Toma el control para responder",
   send: "Enviar",
   loading: "Cargando conversaciones…",
-  unreadCount: "{count} no leídos",
+  unreadCount: "{count} sin leer",
   threadGone: "Esta conversación ya no existe.",
 };
 

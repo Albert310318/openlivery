@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { BadgeCheck, Ban, Bot, CalendarRange, Check, CheckCircle2, ChevronDown, Clock, Download, FileSpreadsheet, Inbox, LoaderCircle, Merge, MessageCircle, MessageSquarePlus, MessageSquareText, MoreHorizontal, Pencil, Plus, Search, Trash2, Upload, UserRound, Users, X } from "lucide-react";
+import { ArrowLeft, BadgeCheck, Ban, Bot, CalendarRange, Check, CheckCircle2, ChevronDown, Clock, Download, FileSpreadsheet, Inbox, LoaderCircle, Merge, MessageCircle, MessageSquarePlus, MessageSquareText, MoreHorizontal, Pencil, Plus, Search, Trash2, Upload, UserRound, Users, X } from "lucide-react";
 import { TemplatePicker } from "./templates";
 import { Alert, EmptyState, Modal } from "@/components/ui";
 import { MessageAttachments, type GalleryImage } from "@/components/attachments";
@@ -347,7 +347,9 @@ export function ContactsView({ slug, channels, openConversation, can, agentName 
   }
 
   return <>
-    <div className="portal-contacts">
+    {/* On a phone the list and the contact take turns on screen (.has-detail
+        rules in the stylesheet); a desktop shows both and ignores it. */}
+    <div className={`portal-contacts${selected ? " has-detail" : ""}`}>
       <aside onScroll={onListScroll}>
         <div className="inbox-search"><Search size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("portal.contacts.searchPlaceholder")} /></div>
         <div className="portal-contacts-toolbar">
@@ -390,6 +392,7 @@ export function ContactsView({ slug, channels, openConversation, can, agentName 
       <section onScroll={onPanelScroll}>
         {selected ? <>
           <header>
+            <button type="button" className="icon-button inbox-back" onClick={() => { setSelected(null); setHistory([]); }} aria-label={t("common.back")} title={t("common.back")}><ArrowLeft size={16} /></button>
             <div>
               <strong>{nameOf(selected)}{selected.blocked_at && <span className="mini-badge blocked"><Ban size={11} /> {t("portal.contacts.blockedBadge")}</span>}</strong>
               <small className="portal-channel-line">{phoneLabel(selected.phone)}{selected.email ? ` · ${selected.email}` : ""}</small>

@@ -63,13 +63,13 @@ const es: typeof en = {
   },
   nextSteps: {
     title: "Primeros pasos",
-    subtitle: "Deja tu espacio listo para conversar",
+    subtitle: "Deja tu espacio de trabajo listo para empezar a conversar",
     step1Title: "Crea un cliente",
-    step1Desc: "Añade su contexto de negocio.",
+    step1Desc: "Agrega su contexto de negocio.",
     step2Title: "Configura un agente",
     step2Desc: "Define instrucciones y personalidad.",
     step3Title: "Conecta tu modelo",
-    step3Desc: "Usa tu propia API key.",
+    step3Desc: "Usa tu propia clave de API.",
   },
   metrics: {
     clients: "Clientes",
@@ -90,7 +90,7 @@ const es: typeof en = {
     empty: "Aún no hay actividad en este periodo.",
   },
   topAgents: {
-    title: "Top agentes",
+    title: "Agentes destacados",
     subtitle: "Por conversaciones",
     conversations: "{count} conv.",
     empty: "Aún no hay conversaciones.",
@@ -107,7 +107,7 @@ const es: typeof en = {
     subtitle: "Últimas configuraciones de tu equipo",
     viewAll: "Ver todos",
     emptyTitle: "Aún no hay agentes",
-    emptyDesc: "Añádelos desde el espacio de cada cliente.",
+    emptyDesc: "Agrégalos desde el espacio de cada cliente.",
   },
 };
 

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, AudioLines, Check, ImageIcon, LoaderCircle, PencilLine, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowRight, AudioLines, Check, ChevronLeft, ChevronRight, ImageIcon, LoaderCircle, PencilLine, Sparkles } from "lucide-react";
 import { Alert } from "@/components/ui";
 import { useToast } from "@/components/toast";
 import { api, messageFrom } from "@/lib/api";
@@ -105,6 +105,20 @@ export default function NewAgentPage() {
         </li>
       ); })}
     </ol>
+    {/* Phone stand-in for the step pills (the stylesheet swaps one for the
+        other): one step at a time, under the same reachability rule the pills
+        enforce, so the arrows can never skip a step the footer would refuse. */}
+    {(() => {
+      const reachable = (index: number) => index >= 0 && index < STEP_KEYS.length && index <= reached && (index <= 1 || (name.trim().length > 0 && Boolean(clientId)));
+      const canForward = !busy && step < STEP_KEYS.length - 1 && (reachable(step + 1) || canNext);
+      return (
+        <div className="section-pager wizard-pager">
+          <button type="button" className="button ghost" disabled={step === 0 || busy} aria-label={t("agents.wizard.back")} onClick={() => setStep((s) => Math.max(0, s - 1))}><ChevronLeft size={18} /></button>
+          <div className="section-pager-current"><span>{step + 1}</span><strong>{t(STEP_KEYS[step])}</strong><small>{step + 1} / {STEP_KEYS.length}</small></div>
+          <button type="button" className="button ghost" disabled={!canForward} aria-label={t("agents.wizard.next")} onClick={() => setStep((s) => Math.min(STEP_KEYS.length - 1, s + 1))}><ChevronRight size={18} /></button>
+        </div>
+      );
+    })()}
 
     <section className="wizard-card">
       {step === 0 && <div className="wizard-templates">

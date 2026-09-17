@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Bot, Clock, Inbox, LoaderCircle, MessageSquareText, MessagesSquare, Timer, UserRound, Users } from "lucide-react";
+import { Bot, ChevronDown, Clock, Inbox, LoaderCircle, MessageSquareText, MessagesSquare, SlidersHorizontal, Timer, UserRound, Users } from "lucide-react";
 import { Alert } from "@/components/ui";
 import { api, messageFrom } from "@/lib/api";
 import { useLanguage, useT } from "@/lib/i18n";
@@ -46,6 +46,9 @@ export function ReportsView({ slug }: { slug: string }) {
   const { lang } = useLanguage();
   const locale = lang === "es" ? "es" : "en";
   const [range, setRange] = useState<number | "custom">(7);
+  // Phone only: the filters start folded behind a toggle so the numbers come
+  // first. A desktop ignores this and always shows them.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [customFrom, setCustomFrom] = useState(daysAgoISO(6));
   const [customTo, setCustomTo] = useState(daysAgoISO(0));
   const [channel, setChannel] = useState("");
@@ -89,7 +92,11 @@ export function ReportsView({ slug }: { slug: string }) {
     return value;
   };
 
-  const filters = <div className="report-filters">
+  const filters = <>
+    <button type="button" className="portal-filters-toggle" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}>
+      <SlidersHorizontal size={16} /><span>{t("portal.inbox.filters.label")}</span><ChevronDown size={18} className={`chevron${filtersOpen ? " open" : ""}`} />
+    </button>
+    <div className={`report-filters${filtersOpen ? "" : " folded"}`}>
     <div className="report-ranges">
       {RANGES.map((value) => <button key={value} type="button" className={value === range ? "active" : ""} onClick={() => setRange(value)}>
         {value === 7 ? t("portal.reports.range7") : value === 30 ? t("portal.reports.range30") : t("portal.reports.range90")}
@@ -115,7 +122,8 @@ export function ReportsView({ slug }: { slug: string }) {
         {teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
       </select>
     </div>
-  </div>;
+    </div>
+  </>;
 
   if (loading && !report) return <div className="portal-reports">{filters}<div className="no-conversations"><LoaderCircle className="spin" size={16} /></div></div>;
   if (error) return <div className="portal-reports">{filters}<Alert>{error}</Alert></div>;

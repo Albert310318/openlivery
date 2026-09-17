@@ -8,7 +8,7 @@ import { useLanguage } from "@/lib/i18n";
 import { businessLabel, useIndustries } from "@/lib/industries";
 import { PageHead, StatusBadge } from "@/components/ui";
 import { ListRowsSkeleton, PanelSkeleton, Skeleton } from "@/components/skeleton";
-import type { Agent, AgentSummary, Conversation } from "@/types";
+import type { Agent, AgentSummary, Conversation, Provider } from "@/types";
 
 type Dashboard = { clients: number; active_clients: number; agents: number; active_agents: number; conversations: number; channels: number; connected_channels: number; recent_agents: AgentSummary[] };
 type DailyPoint = { date: string; count: number };
@@ -24,9 +24,10 @@ export default function HomePage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [range, setRange] = useState(14);
+  const [modelConnected, setModelConnected] = useState(false);
   const [loadedCore, setLoadedCore] = useState(false);
   const [loadedMetrics, setLoadedMetrics] = useState(false);
-  useEffect(() => { Promise.all([api<Dashboard>("/dashboard"), api<Agent[]>("/agents"), api<Conversation[]>("/conversations")]).then(([d, a, x]) => { setData(d); setAgents(a); setConversations(x); }).catch(() => {}).finally(() => setLoadedCore(true)); }, []);
+  useEffect(() => { Promise.all([api<Dashboard>("/dashboard"), api<Agent[]>("/agents"), api<Conversation[]>("/conversations"), api<Provider[]>("/providers")]).then(([d, a, x, p]) => { setData(d); setAgents(a); setConversations(x); setModelConnected(p.some((item) => item.configured)); }).catch(() => {}).finally(() => setLoadedCore(true)); }, []);
   useEffect(() => { setLoadedMetrics(false); api<Metrics>(`/dashboard/metrics?days=${range}`).then(setMetrics).catch(() => {}).finally(() => setLoadedMetrics(true)); }, [range]);
 
   const maxDaily = Math.max(1, ...(metrics?.daily_conversations.map((p) => p.count) ?? [0]));
@@ -39,7 +40,7 @@ export default function HomePage() {
       <PageHead eyebrow={t("home.head.eyebrow")} title={t("home.head.title")} description={t("home.head.description")} action={<label className="range-select"><select value={range} onChange={(e) => setRange(Number(e.target.value))}>{[7, 14, 30, 90].map((n) => <option key={n} value={n}>{t("home.range.days", { count: n })}</option>)}</select></label>} />
       <section className="panel next-steps home-next-steps">
         <div className="panel-head"><div><h3>{t("home.nextSteps.title")}</h3><p>{t("home.nextSteps.subtitle")}</p></div></div>
-        <ol><li className={loadedCore && data?.clients ? "done" : ""}>{loadedCore ? <span>{data?.clients ? "✓" : "1"}</span> : <span><Skeleton style={{ width: 18, height: 18, borderRadius: 999 }} /></span>}<div><strong>{t("home.nextSteps.step1Title")}</strong><small>{t("home.nextSteps.step1Desc")}</small></div></li><li className={loadedCore && data?.agents ? "done" : ""}>{loadedCore ? <span>{data?.agents ? "✓" : "2"}</span> : <span><Skeleton style={{ width: 18, height: 18, borderRadius: 999 }} /></span>}<div><strong>{t("home.nextSteps.step2Title")}</strong><small>{t("home.nextSteps.step2Desc")}</small></div></li><li><span>3</span><div><strong>{t("home.nextSteps.step3Title")}</strong><small>{t("home.nextSteps.step3Desc")}</small></div></li></ol>
+        <ol><li className={loadedCore && data?.clients ? "done" : ""}>{loadedCore ? <span>{data?.clients ? "✓" : "1"}</span> : <span><Skeleton style={{ width: 18, height: 18, borderRadius: 999 }} /></span>}<div><strong>{t("home.nextSteps.step1Title")}</strong><small>{t("home.nextSteps.step1Desc")}</small></div></li><li className={loadedCore && data?.agents ? "done" : ""}>{loadedCore ? <span>{data?.agents ? "✓" : "2"}</span> : <span><Skeleton style={{ width: 18, height: 18, borderRadius: 999 }} /></span>}<div><strong>{t("home.nextSteps.step2Title")}</strong><small>{t("home.nextSteps.step2Desc")}</small></div></li><li className={loadedCore && modelConnected ? "done" : ""}>{loadedCore ? <span>{modelConnected ? "✓" : "3"}</span> : <span><Skeleton style={{ width: 18, height: 18, borderRadius: 999 }} /></span>}<div><strong>{t("home.nextSteps.step3Title")}</strong><small>{t("home.nextSteps.step3Desc")}</small></div></li></ol>
       </section>
       <section className="metrics-grid">
         <article className="metric-card"><span className="metric-icon blue"><Building2 size={20} /></span><div><small>{t("home.metrics.clients")}</small><strong>{loadedCore ? data?.clients ?? "—" : <Skeleton className="sk-line" style={{ width: 52, height: 28 }} />}</strong><p>{t("home.metrics.clientsActive", { count: data?.active_clients ?? 0 })}</p></div></article>

@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, AudioLines, Bot, CheckCircle2, FileText, ImageIcon, LoaderCircle, MessageSquareText, Plug, Plus, Power, PowerOff, RefreshCw, Save, Settings2, Sparkles, Trash2, UploadCloud, XCircle } from "lucide-react";
+import { SectionTabs } from "@/components/section-tabs";
 import { api, messageFrom } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { businessLabel, useIndustries } from "@/lib/industries";
@@ -194,7 +195,12 @@ export default function AgentDetailPage() {
         <div className="modal-actions"><button type="button" className="button" onClick={() => setDeleteOpen(false)}>{t("common.cancel")}</button><button type="button" className="button danger" disabled={busy || deleteName.trim() !== agent.name.trim()} onClick={removeAgent}>{busy ? <LoaderCircle className="spin" size={16} /> : <><Trash2 size={15} /> {t("agents.detail.deleteAgent")}</>}</button></div>
       </div>
     </Modal>
-    <nav className="tabs"><button className={tab === "basics" ? "active" : ""} onClick={() => setTab("basics")}><Settings2 size={17} /> {t("agents.detail.tabBasics")}</button><button className={tab === "knowledge" ? "active" : ""} onClick={() => setTab("knowledge")}><FileText size={17} /> {t("agents.detail.tabKnowledge")} <span>{documents.length}</span></button><button className={tab === "tools" ? "active" : ""} onClick={() => setTab("tools")}><Plug size={17} /> {t("tools.tab")} <span>{tools.length}</span></button><button className={tab === "playground" ? "active" : ""} onClick={() => setTab("playground")}><MessageSquareText size={17} /> {t("agents.detail.tabPlayground")}</button></nav>
+    <SectionTabs<Tab> value={tab} onChange={setTab} tabs={[
+      { id: "basics", label: t("agents.detail.tabBasics"), icon: Settings2 },
+      { id: "knowledge", label: t("agents.detail.tabKnowledge"), icon: FileText, badge: documents.length },
+      { id: "tools", label: t("tools.tab"), icon: Plug, badge: tools.length },
+      { id: "playground", label: t("agents.detail.tabPlayground"), icon: MessageSquareText },
+    ]} />
 
     {tab === "basics" && <form className="settings-form" onSubmit={saveConfig}>
       <section className="settings-section"><div className="settings-copy"><h3>{t("agents.detail.generalHeading")} <AiHint text={t("aiContext.agentName")} /></h3><p>{t("agents.detail.generalCopy")}</p></div><div className="settings-fields"><div className="form-grid"><label>{t("agents.detail.nameLabel")}<input value={name} required onChange={(e) => setName(e.target.value)} /></label><label>{t("agents.detail.clientLabel")}<input value={agent.client.name} readOnly /></label></div><p className="greeting-preview">{t("agents.detail.greetingPreview", { name: name.trim() || agent.name, client: agent.client.name })}</p></div></section>

@@ -77,14 +77,14 @@ const es: typeof en = {
     status: "Ideal para pruebas",
     title: "WhatsApp QR",
     description:
-      "Escanea un QR con la app de WhatsApp de tu teléfono y responde con un agente en minutos. Es gratis e instantáneo de configurar, así que es ideal para demos y pruebas. Para producción usa mejor WhatsApp API.",
+      "Escanea un QR con la app de WhatsApp de tu teléfono y responde con un agente en minutos. Se configura gratis y al instante, así que es ideal para demos y pruebas. Para producción usa mejor WhatsApp API.",
     ownerPlaceholder: "Elige un cliente para configurar su número",
     configure: "Configurar",
     selectClient: "Selecciona un cliente",
   },
   webchat: {
     status: "Disponible",
-    title: "Webchat",
+    title: "Chat web",
     description:
       "Inserta un asistente en cualquier sitio web con una línea de código. Sus conversaciones llegan al mismo Inbox que WhatsApp.",
     ownerPlaceholder: "Elige un cliente para configurar su widget",
@@ -102,7 +102,7 @@ const es: typeof en = {
     },
     facebook: {
       name: "Facebook Messenger",
-      description: "Conecta tus páginas y mantén una atención consistente.",
+      description: "Conecta tus páginas y mantén una atención uniforme.",
     },
   },
 };
