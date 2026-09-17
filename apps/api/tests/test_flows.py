@@ -64,6 +64,7 @@ def test_chat_completion_uses_chat_completions_and_reads_cost(monkeypatch):
     assert captured["headers"]["Authorization"] == "Bearer secret"
     assert captured["headers"]["X-Title"] == "OpenLivery"
     assert captured["payload"]["messages"] == [{"role": "system", "content": "Be brief"}, {"role": "user", "content": "Hello"}]
+    assert captured["payload"]["usage"] == {"include": True}  # ask the router to price the call
     assert captured["payload"]["max_tokens"] == 100
     assert "temperature" not in captured["payload"]  # no sampling params passed
     assert (answer.input_tokens, answer.output_tokens) == (27, 26)

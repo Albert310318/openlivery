@@ -58,7 +58,9 @@ async def tool_loop(
     attachments: list = []
 
     for iteration in range(MAX_TOOL_ITERATIONS + 1):
-        payload: dict = {"model": model, "messages": convo, "tools": tools}
+        # usage.include asks OpenRouter to price each turn in the response; the
+        # per-turn costs add up across the loop in ``read_usage``.
+        payload: dict = {"model": model, "messages": convo, "tools": tools, "usage": {"include": True}}
         if iteration == MAX_TOOL_ITERATIONS:
             # Cap reached: tools stay in the payload (required when the history
             # contains tool calls) but the model must answer with text.

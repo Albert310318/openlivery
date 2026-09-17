@@ -113,7 +113,13 @@ def sampling_params(temperature: float | None, max_tokens: int | None) -> dict:
 
 
 async def _chat_completions(base_url, api_key, model, messages, temperature, max_tokens) -> Completion:
-    payload = {"model": model, "messages": [{"role": m["role"], "content": m["content"]} for m in messages]}
+    payload = {
+        "model": model,
+        "messages": [{"role": m["role"], "content": m["content"]} for m in messages],
+        # Ask OpenRouter to price the call in the response, so the usage record
+        # carries the real charge instead of waiting on a reconcile.
+        "usage": {"include": True},
+    }
     data = await _post_json(chat_url(base_url), auth_headers(api_key), payload, sampling_params(temperature, max_tokens))
     return completion_from(extract_chat_text(data), read_usage(data), data)
 

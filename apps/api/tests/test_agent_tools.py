@@ -336,6 +336,8 @@ def test_tool_loop_round_trip(monkeypatch):
 
     first = llm_calls[0]["payload"]
     assert llm_calls[0]["url"].endswith("/chat/completions")
+    # Every turn asks OpenRouter to price the call, so the reply carries the real cost.
+    assert first["usage"] == {"include": True}
     assert first["messages"][0] == {"role": "system", "content": "Be helpful"}
     tool = first["tools"][0]
     assert tool["type"] == "function"
