@@ -24,6 +24,7 @@ from ..deps import get_current_user
 from ..models import Agent, Client, Conversation, Message, UsageRecord, User
 from ..schemas import CostReport, RepliesPage
 from ..services.model_catalog import get_model
+from ..services.report_operations import ConversationFilters, filter_options, operations
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -270,3 +271,31 @@ def replies(
     total = db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0
     items = [_reply(row) for row in db.execute(query.limit(limit).offset(offset)).all()]
     return {"items": items, "total": int(total)}
+
+
+@router.get("/operations")
+def operations_report(
+    date_from: date = Query(alias="from"),
+    date_to: date = Query(alias="to"),
+    client_id: uuid.UUID | None = None,
+    agent_id: uuid.UUID | None = None,
+    channel: str | None = None,
+    model: str | None = None,
+    tz: str | None = None,
+    bucket: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """How the agents attended the range's conversations: totals, timing and
+    message volume, by client and channel and over time."""
+    filters = ConversationFilters(
+        user.agency_id, date_from=date_from, date_to=date_to, client_id=client_id,
+        agent_id=agent_id, channel=channel, tz=tz, model=model, bucket=bucket,
+    )
+    return operations(db, filters)
+
+
+@router.get("/filters")
+def report_filters(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """The clients, agents, channels and models for the report dropdowns."""
+    return filter_options(db, user.agency_id)

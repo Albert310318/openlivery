@@ -450,6 +450,17 @@ export type SocialHistoryJob = {
 
 export type ReportGroup = { id: string | null; name: string; replies: number; input_tokens: number; output_tokens: number; cost_usd: number };
 
+export type OpsMetrics = {
+  conversations: number; contacts: number; new_contacts: number;
+  ai_resolved: number; ai_resolved_pct: number; handoffs: number; open: number; unanswered: number;
+  first_reply_s: number | null; resolution_s: number | null; human_wait_s: number | null;
+  inbound: number; ai_replies: number; human_replies: number; delivery_failures: number; tool_errors: number;
+};
+export type OpsGroup = OpsMetrics & { id: string | null; name: string };
+export type OpsPeriod = { day: string; conversations: number; handoffs: number; inbound: number; outbound: number };
+export type Operations = { tz: string; bucket: string; totals: OpsMetrics; by_client: OpsGroup[]; by_channel: OpsGroup[]; by_period: OpsPeriod[] };
+export type ReportFilters = { clients: { id: string; name: string }[]; agents: { id: string; name: string; client_id: string }[]; channels: string[]; models: string[] };
+
 export type CostReport = {
   totals: { cost_usd: number; replies: number; conversations: number; input_tokens: number; output_tokens: number; avg_cost_per_reply_usd: number };
   by_client: ReportGroup[];
