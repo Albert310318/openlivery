@@ -91,8 +91,33 @@ export function providerLabel(id: string): string {
   return PROVIDERS.find((p) => p.id === id)?.label ?? id;
 }
 
+// What the API's catalog says about every model OpenRouter serves, loaded by
+// useAvailableModels. The static lists above are the seed: they keep the
+// curated labels, tiers and the recommended default for the models we know,
+// and everything else takes its name and context window from here.
+export type LiveModel = { id: string; label: string; provider: string; context_window: number; output_price_per_1k: number };
+
+let liveOptions: ModelOption[] = [];
+const liveContext = new Map<string, number>();
+
+// A tier from the list price, so a model the seed does not know still gets a
+// tag in the picker.
+function tierFor(outputPricePer1k: number): ModelGroup {
+  if (outputPricePer1k < 0.002) return "fast";
+  if (outputPricePer1k < 0.01) return "balanced";
+  return "capable";
+}
+
+export function setLiveModels(models: LiveModel[]): void {
+  const seeded = new Set<string>(PROVIDERS.flatMap((p) => p.models.map((m) => m.id)));
+  liveOptions = models.filter((m) => !seeded.has(m.id)).map((m) => ({ id: m.id, label: m.label, group: tierFor(m.output_price_per_1k) }));
+  liveContext.clear();
+  for (const m of models) liveContext.set(m.id, m.context_window);
+}
+
 export function modelOptionsFor(id: string): readonly ModelOption[] {
-  return PROVIDERS.find((p) => p.id === id)?.models ?? [];
+  const seed: readonly ModelOption[] = PROVIDERS.find((p) => p.id === id)?.models ?? [];
+  return id === DEFAULT_PROVIDER ? [...seed, ...liveOptions] : seed;
 }
 
 export function modelsFor(id: string): readonly string[] {
@@ -118,6 +143,9 @@ export function estimateTokens(text: string): number {
 // Approximate context window (in tokens) per model family, used only for the
 // "context window usage" bar. Values are representative, not exact.
 export function modelContextWindow(id: string): number {
+  // What OpenRouter reports for the model, once the catalog has loaded.
+  const live = liveContext.get(id);
+  if (live) return live;
   // Slugs are "vendor/model"; the family is readable from the model part.
   const name = id.includes("/") ? id.slice(id.indexOf("/") + 1) : id;
   // Haiku is the one current Claude model still on a 200k window; the rest of

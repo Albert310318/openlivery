@@ -1,17 +1,50 @@
-"""AI model catalog with metadata (backend source of truth).
+"""AI model catalog, read live from OpenRouter (backend source of truth).
 
-Models are OpenRouter slugs (``vendor/model``). Each declares its context
-window, capabilities (tools/vision) and OpenRouter's list price per 1k tokens.
-This metadata powers:
-- the model picker and token counter in the agent creation wizard,
-- the per-model price figures the catalog API exposes to clients.
+Models are OpenRouter slugs (``vendor/model``). The catalog is what OpenRouter
+serves right now: its ``/models`` list for chat (and, through the image
+modality, vision) and its ``/embeddings/models`` list for the knowledge base,
+each with the context window, capabilities and list price OpenRouter reports.
+Nothing about a model is written down here; a new model on OpenRouter shows
+up on the next refresh, and a retired one goes away.
 
-IDs are kept in sync with `apps/web/lib/providers.ts`. Keep both in sync when
-adding models. Any other OpenRouter slug still works when typed by hand: the
-catalog is the curated offer, not a whitelist.
+The one exception is transcription. OpenRouter serves speech-to-text through
+its audio endpoint but lists those models nowhere its API exposes, so the
+offer comes from ``TRANSCRIPTION_MODELS`` (a setting, not a price list): what
+a transcription cost is what OpenRouter reports for the call, reconciled after
+the fact like any other reply.
+
+The list is cached in process and refreshed after CATALOG_TTL; a refresh that
+fails keeps serving the last good list, so a hiccup at OpenRouter never empties
+the pickers. A deployment may narrow ``available_models`` (the cloud does, to
+the models its platform credit serves), which is why the frontend asks for it
+instead of trusting a static list.
 """
 
+from __future__ import annotations
+
+import logging
+import threading
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+
+import httpx
+
+from ..config import get_settings
+
+logger = logging.getLogger("app.model_catalog")
+
+CATALOG_TTL = timedelta(hours=1)
+FETCH_TIMEOUT = 8.0
+# The knowledge base chunks at ~1,800 characters; an embedding model that
+# takes less than this cannot embed a chunk, so it is left out.
+MIN_EMBEDDING_CONTEXT = 2_000
+# Standard approximation to estimate tokens without a tokenizer: ~4 chars/token.
+CHARS_PER_TOKEN = 4
+
+# Transcription model an agent gets unless it picks another one.
+DEFAULT_AUDIO_MODEL = "openai/gpt-4o-mini-transcribe"
+# Embedding model an agent's knowledge base uses unless it picks another one.
+DEFAULT_EMBEDDING_MODEL = "openai/text-embedding-3-small"
 
 
 @dataclass(frozen=True)
@@ -32,136 +65,205 @@ class ModelInfo:
     note: str = ""
 
 
-# Standard approximation to estimate tokens without a tokenizer: ~4 chars/token.
-CHARS_PER_TOKEN = 4
-
-# Transcription model an agent gets unless it picks another one.
-DEFAULT_AUDIO_MODEL = "openai/gpt-4o-mini-transcribe"
-
-# Embedding model an agent's knowledge base uses unless it picks another one.
-DEFAULT_EMBEDDING_MODEL = "openai/text-embedding-3-small"
-
-
 @dataclass(frozen=True)
 class EmbeddingModelInfo:
     id: str
     provider: str
     label: str
-    # Longest input the model embeds, in tokens. Chunks are ~1,800 characters,
-    # so anything under 2k tokens is left out of the catalog.
+    # Longest input the model embeds, in tokens.
     context_window: int
     # List price per 1,000 input tokens, in USD (embeddings have no output).
     input_price_per_1k: float
     note: str = ""
 
 
-# Curated from OpenRouter's embeddings catalog (GET /api/v1/embeddings/models).
-# Any other slug that endpoint serves still works when set through the API.
-EMBEDDING_MODELS: tuple[EmbeddingModelInfo, ...] = (
-    EmbeddingModelInfo(DEFAULT_EMBEDDING_MODEL, "openai", "OpenAI text-embedding-3 small", 8_192, 0.00002,
-                       "Default. Cheap and solid for most knowledge bases."),
-    EmbeddingModelInfo("openai/text-embedding-3-large", "openai", "OpenAI text-embedding-3 large", 8_192, 0.00013,
-                       "Higher accuracy at six times the price."),
-    EmbeddingModelInfo("google/gemini-embedding-2", "google", "Gemini Embedding 2", 8_192, 0.0002,
-                       "Google's current embedding model, strong on multilingual text."),
-    EmbeddingModelInfo("qwen/qwen3-embedding-8b", "qwen", "Qwen3 Embedding 8B", 32_768, 0.00001,
-                       "Open model with a long input window, very cheap."),
-    EmbeddingModelInfo("voyageai/voyage-4", "voyageai", "Voyage 4", 32_000, 0.00006,
-                       "Retrieval-focused model with a long input window."),
-    EmbeddingModelInfo("voyageai/voyage-4-lite", "voyageai", "Voyage 4 Lite", 32_000, 0.00002,
-                       "Lighter Voyage model at the default's price."),
-    EmbeddingModelInfo("mistralai/mistral-embed-2312", "mistralai", "Mistral Embed", 8_192, 0.0001,
-                       "Mistral's embedding model."),
-)
-_EMBEDDING_BY_ID: dict[str, EmbeddingModelInfo] = {model.id: model for model in EMBEDDING_MODELS}
+@dataclass(frozen=True)
+class Snapshot:
+    """One read of the catalog, chat and embedding models together."""
+
+    models: tuple[ModelInfo, ...]
+    embeddings: tuple[EmbeddingModelInfo, ...]
+    # Speech-to-text, never offered as chat.
+    audio: tuple[ModelInfo, ...]
+    fetched_at: datetime | None
+
+    def stale(self) -> bool:
+        return self.fetched_at is None or datetime.now(timezone.utc) - self.fetched_at > CATALOG_TTL
 
 
-_MODELS: tuple[ModelInfo, ...] = (
-    # OpenAI
-    ModelInfo("openai/gpt-5.6-luna", "openai", "GPT-5.6 Luna", "gpt-5.6", 1_050_000, 128_000, True, True,
-              0.0002, 0.0012, "Most affordable", "High volume, chat and cost-sensitive automations."),
-    ModelInfo("openai/gpt-5.6-terra", "openai", "GPT-5.6 Terra", "gpt-5.6", 1_050_000, 128_000, True, True,
-              0.002, 0.012, "Balanced", "A good balance of capability, speed and price."),
-    ModelInfo("openai/gpt-5.6-sol", "openai", "GPT-5.6 Sol", "gpt-5.6", 1_050_000, 128_000, True, True,
-              0.002, 0.01, "Top capability", "Complex work and more demanding responses."),
-    ModelInfo("openai/gpt-5.5", "openai", "GPT-5.5", "gpt-5.5", 1_050_000, 128_000, True, True,
-              0.005, 0.03, "Previous generation", "Available for compatibility and gradual migrations."),
-    ModelInfo("openai/gpt-5.4", "openai", "GPT-5.4", "gpt-5.4", 1_050_000, 128_000, True, True,
-              0.0025, 0.015, "Previous generation", "Superseded by GPT-5.6 Terra at a lower price."),
-    ModelInfo("openai/gpt-5.4-mini", "openai", "GPT-5.4 mini", "gpt-5.4", 400_000, 128_000, True, True,
-              0.00075, 0.0045, "Previous generation", "Mid-tier option from the previous family."),
-    ModelInfo("openai/gpt-5.4-nano", "openai", "GPT-5.4 nano", "gpt-5.4", 400_000, 128_000, True, True,
-              0.0002, 0.00125, "Previous generation", "Superseded by GPT-5.6 Luna."),
-    ModelInfo("openai/gpt-4.1", "openai", "GPT-4.1", "gpt-4.1", 1_047_576, 32_768, True, True,
-              0.002, 0.008, "No reasoning step", "Lower latency for instruction following and tool calls."),
-    ModelInfo("openai/gpt-4.1-mini", "openai", "GPT-4.1 mini", "gpt-4.1", 1_047_576, 32_768, True, True,
-              0.0004, 0.0016, "No reasoning step", "Economical option with a wide context window."),
-    ModelInfo("openai/gpt-4.1-nano", "openai", "GPT-4.1 nano", "gpt-4.1", 1_047_576, 32_768, True, True,
-              0.0001, 0.0004, "Most affordable", "The lowest-cost text model in the line-up."),
-    # Google Gemini
-    ModelInfo("google/gemini-3.8-flash", "google", "Gemini 3.8 Flash", "gemini-3", 1_048_576, 65_536, True, True,
-              0.00075, 0.00375, "Current", "Fast, balanced model for agents and applications."),
-    ModelInfo("google/gemini-3.7-flash", "google", "Gemini 3.7 Flash", "gemini-3", 1_048_576, 65_536, True, True,
-              0.00075, 0.00375, "Stable", "The previous Flash release, same price."),
-    ModelInfo("google/gemini-3.6-flash", "google", "Gemini 3.6 Flash", "gemini-3", 1_048_576, 65_536, True, True,
-              0.00075, 0.00375, "Stable", "Kept for agents that were tuned on it."),
-    ModelInfo("google/gemini-3.5-flash", "google", "Gemini 3.5 Flash", "gemini-3", 1_048_576, 65_536, True, True,
-              0.0015, 0.009, "Previous generation", "Superseded by Gemini 3.8 Flash at a lower price."),
-    ModelInfo("google/gemini-3.5-flash-lite", "google", "Gemini 3.5 Flash-Lite", "gemini-3", 1_048_576, 65_536, True, True,
-              0.0003, 0.0025, "Economical", "The lowest-cost alternative in the Gemini 3.5 family."),
-    ModelInfo("google/gemini-3.1-flash-lite", "google", "Gemini 3.1 Flash-Lite", "gemini-3", 1_048_576, 65_536, True, True,
-              0.00025, 0.0015, "Economical", "Very cheap, for simple high-volume chat."),
-    # Anthropic
-    ModelInfo("anthropic/claude-sonnet-5", "anthropic", "Claude Sonnet 5", "claude", 1_000_000, 128_000, True, True,
-              0.002, 0.01, "Balanced", "A mix of speed and intelligence for production."),
-    ModelInfo("anthropic/claude-opus-5", "anthropic", "Claude Opus 5", "claude", 1_000_000, 128_000, True, True,
-              0.005, 0.025, "Top capability", "Complex tasks, reasoning and demanding agent flows."),
-    ModelInfo("anthropic/claude-fable-5", "anthropic", "Claude Fable 5", "claude", 1_000_000, 128_000, True, True,
-              0.01, 0.05, "Maximum capability", "Deep research and long autonomous runs."),
-    ModelInfo("anthropic/claude-haiku-4.5", "anthropic", "Claude Haiku 4.5", "claude", 200_000, 64_000, True, True,
-              0.001, 0.005, "Fast", "Quick responses and simpler workloads."),
-    # DeepSeek
-    ModelInfo("deepseek/deepseek-v4-flash", "deepseek", "DeepSeek V4 Flash", "deepseek-v4", 1_048_576, 384_000, True, False,
-              0.0000657, 0.0001313, "Economical", "High-volume chat and agents with up to 1M context."),
-    ModelInfo("deepseek/deepseek-v4-pro", "deepseek", "DeepSeek V4 Pro", "deepseek-v4", 1_048_576, 393_216, True, False,
-              0.0016, 0.0032, "Advanced", "Reasoning, code and complex long-running flows."),
-    # xAI
-    ModelInfo("x-ai/grok-4.5", "xai", "Grok 4.5", "grok-4", 500_000, 450_000, True, True,
-              0.002, 0.006, "Current", "xAI's main model for code, agents and general work."),
-    # Meta
-    ModelInfo("meta-llama/llama-4-maverick", "meta", "Llama 4 Maverick", "llama-4", 1_048_576, 115_200, True, True,
-              0.0002, 0.000696, "Open weights", "Meta's open model, cheap and multimodal."),
-)
+def _vendor(model_id: str) -> str:
+    return model_id.split("/", 1)[0] if "/" in model_id else ""
 
-# Speech-to-text models, priced so a transcription the provider did not price
-# (OpenRouter reports no vendor charge for audio) can be valued at list price.
-# Never offered as chat models. Audio tokens in, text tokens out.
-_AUDIO_MODEL_INFO: tuple[ModelInfo, ...] = (
-    ModelInfo("openai/gpt-4o-mini-transcribe", "openai", "GPT-4o mini Transcribe", "transcribe", 16_000, 2_000, False, False,
-              0.003, 0.005),
-    ModelInfo("openai/gpt-4o-transcribe", "openai", "GPT-4o Transcribe", "transcribe", 16_000, 2_000, False, False,
-              0.006, 0.01),
-)
 
-_BY_ID: dict[str, ModelInfo] = {model.id: model for model in (*_MODELS, *_AUDIO_MODEL_INFO)}
+def _label(name: str, model_id: str) -> str:
+    """OpenRouter names models "Vendor: Model"; the vendor is already in the
+    slug, so the label keeps the model part."""
+    name = (name or "").strip()
+    if ": " in name:
+        return name.split(": ", 1)[1].strip() or name
+    return name or model_id
+
+
+def _per_1k(value) -> float:
+    """OpenRouter prices per token, as strings; -1 marks a price it will only
+    know at request time, which is no list price at all."""
+    try:
+        price = float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    # Rounded past any figure OpenRouter uses, so 2e-7 a token reads 0.0002.
+    return round(price * 1000, 10) if price > 0 else 0.0
+
+
+def _parse_model(raw: dict) -> ModelInfo | None:
+    model_id = raw.get("id") or ""
+    architecture = raw.get("architecture") or {}
+    inputs = set(architecture.get("input_modalities") or [])
+    outputs = set(architecture.get("output_modalities") or [])
+    # Aliases (``~vendor/latest``) and batch-only endpoints are not something
+    # an agent can be pointed at.
+    if not model_id or model_id.startswith("~") or model_id.endswith(":batch"):
+        return None
+    if "text" not in inputs or "text" not in outputs:
+        return None
+    pricing = raw.get("pricing") or {}
+    top = raw.get("top_provider") or {}
+    context = int(raw.get("context_length") or top.get("context_length") or 0)
+    return ModelInfo(
+        id=model_id,
+        provider=_vendor(model_id),
+        label=_label(raw.get("name") or "", model_id),
+        family=_vendor(model_id),
+        context_window=context,
+        max_output_tokens=int(top.get("max_completion_tokens") or min(context, 16_384) or 0),
+        supports_tools="tools" in (raw.get("supported_parameters") or []),
+        supports_vision="image" in inputs,
+        input_price_per_1k=_per_1k(pricing.get("prompt")),
+        output_price_per_1k=_per_1k(pricing.get("completion")),
+    )
+
+
+def _parse_embedding(raw: dict) -> EmbeddingModelInfo | None:
+    model_id = raw.get("id") or ""
+    context = int(raw.get("context_length") or 0)
+    if not model_id or model_id.startswith("~") or context < MIN_EMBEDDING_CONTEXT:
+        return None
+    pricing = raw.get("pricing") or {}
+    return EmbeddingModelInfo(
+        id=model_id,
+        provider=_vendor(model_id),
+        label=_label(raw.get("name") or "", model_id),
+        context_window=context,
+        input_price_per_1k=_per_1k(pricing.get("prompt")),
+    )
+
+
+def fetch_catalog() -> tuple[list[ModelInfo], list[EmbeddingModelInfo]]:
+    """Read OpenRouter's lists. Public endpoints, no key needed."""
+    from .providers import DEFAULT_PROVIDER, base_url_for
+
+    base = base_url_for(DEFAULT_PROVIDER).rstrip("/")
+    with httpx.Client(timeout=FETCH_TIMEOUT) as client:
+        chat = client.get(f"{base}/models")
+        chat.raise_for_status()
+        embeddings = client.get(f"{base}/embeddings/models")
+        embeddings.raise_for_status()
+    models = [m for m in (_parse_model(raw) for raw in chat.json().get("data") or []) if m]
+    embedding_models = [m for m in (_parse_embedding(raw) for raw in embeddings.json().get("data") or []) if m]
+    return models, embedding_models
+
+
+def _transcription_ids() -> list[str]:
+    raw = getattr(get_settings(), "transcription_models", "") or ""
+    ids = [m.strip() for m in raw.split(",") if m.strip()]
+    return ids or [DEFAULT_AUDIO_MODEL]
+
+
+def _audio_entries(priced: dict[str, ModelInfo] | None = None) -> tuple[ModelInfo, ...]:
+    """The transcription models, as bare entries: OpenRouter lists them
+    nowhere, so they carry no list price unless a snapshot supplied one."""
+    priced = priced or {}
+    return tuple(
+        priced.get(model_id) or ModelInfo(
+            model_id, _vendor(model_id), _label("", model_id), "transcribe", 16_000, 2_000, False, False, 0.0, 0.0,
+        )
+        for model_id in _transcription_ids()
+    )
+
+
+def _seed() -> Snapshot:
+    """What the catalog offers before OpenRouter has answered once: the
+    defaults, so an agent can still be created, and nothing priced."""
+    chat = ModelInfo("openai/gpt-5.6-luna", "openai", "GPT-5.6 Luna", "openai", 0, 0, True, True, 0.0, 0.0)
+    embedding = EmbeddingModelInfo(DEFAULT_EMBEDDING_MODEL, "openai", "text-embedding-3-small", 8_192, 0.0)
+    return Snapshot((chat,), (embedding,), _audio_entries(), None)
+
+
+_lock = threading.Lock()
+_current: Snapshot | None = None
+
+
+def _ordered(models) -> tuple:
+    """By vendor, then name: how the pickers list them, whatever the source."""
+    return tuple(sorted(models, key=lambda m: (m.provider, m.label.lower())))
+
+
+def set_snapshot(models, embeddings, *, audio=None, fetched_at: datetime | None = None) -> None:
+    """Install a catalog directly, for tests and for deployments that ship a
+    fixed list instead of reading OpenRouter."""
+    global _current
+    priced = {m.id: m for m in (audio or ())}
+    _current = Snapshot(_ordered(models), _ordered(embeddings), _audio_entries(priced),
+                        fetched_at or datetime.now(timezone.utc))
+
+
+def _snapshot() -> Snapshot:
+    """The current catalog, refreshed when stale; a failed refresh keeps the
+    last good list."""
+    global _current
+    if _current is not None and not _current.stale():
+        return _current
+    with _lock:
+        if _current is not None and not _current.stale():
+            return _current
+        try:
+            models, embeddings = fetch_catalog()
+            audio = {m.id: m for m in _current.audio} if _current else {}
+            _current = Snapshot(_ordered(models), _ordered(embeddings), _audio_entries(audio), datetime.now(timezone.utc))
+        except Exception:  # noqa: BLE001 - never empty the pickers over a network hiccup
+            logger.warning("Could not refresh the model catalog from OpenRouter", exc_info=True)
+            if _current is None:
+                _current = _seed()
+            else:
+                # Serve the stale list and try again on the next read after a short back-off.
+                _current = Snapshot(_current.models, _current.embeddings, _current.audio,
+                                    datetime.now(timezone.utc) - CATALOG_TTL + timedelta(minutes=5))
+        return _current
 
 
 def list_models() -> list[ModelInfo]:
-    """All catalog models, in declaration order."""
-    return list(_MODELS)
+    """Every chat model OpenRouter serves, by vendor and name."""
+    return list(_snapshot().models)
 
 
 def get_model(model_id: str) -> ModelInfo | None:
-    """Metadata for a model by its ID (chat or audio), or None if not in the catalog."""
-    return _BY_ID.get(model_id)
+    """Metadata for a model by its ID (chat or transcription), or None."""
+    snapshot = _snapshot()
+    for model in (*snapshot.models, *snapshot.audio):
+        if model.id == model_id:
+            return model
+    return None
 
 
 def list_embedding_models() -> list[EmbeddingModelInfo]:
-    return list(EMBEDDING_MODELS)
+    return list(_snapshot().embeddings)
 
 
 def get_embedding_model(model_id: str) -> EmbeddingModelInfo | None:
-    return _EMBEDDING_BY_ID.get(model_id)
+    for model in _snapshot().embeddings:
+        if model.id == model_id:
+            return model
+    return None
 
 
 def estimate_tokens(text: str) -> int:
@@ -169,24 +271,27 @@ def estimate_tokens(text: str) -> int:
     return (len(text) + CHARS_PER_TOKEN - 1) // CHARS_PER_TOKEN
 
 
-# Capability model lists the app offers (mirrored by the frontend as its
-# loading fallback in apps/web/lib/providers.ts). Transcription goes through
-# OpenRouter's audio endpoint; image understanding uses any vision-capable
-# chat model.
-AUDIO_MODELS = (DEFAULT_AUDIO_MODEL, "openai/gpt-4o-transcribe", "openai/gpt-transcribe")
-IMAGE_MODELS = tuple(model.id for model in _MODELS if model.supports_vision)
+def image_models() -> list[str]:
+    """Chat models that accept images: the image-understanding capability."""
+    return [model.id for model in _snapshot().models if model.supports_vision]
+
+
+def audio_models() -> list[str]:
+    """Speech-to-text models, for the audio capability."""
+    return [model.id for model in _snapshot().audio]
 
 
 def available_models() -> dict:
     """Model ids a workspace can pick, per provider and capability.
 
-    A stock install offers the whole catalog. A deployment may narrow this
-    (for example to the models its managed credentials can actually serve),
+    A stock install offers everything OpenRouter serves. A deployment may
+    narrow this (for example to the models its managed credit can serve),
     which is why the frontend asks instead of trusting its static lists.
     """
+    snapshot = _snapshot()
     return {
-        "chat": {"openrouter": [model.id for model in _MODELS]},
-        "image": list(IMAGE_MODELS),
-        "audio": list(AUDIO_MODELS),
-        "embedding": [model.id for model in EMBEDDING_MODELS],
+        "chat": {"openrouter": [model.id for model in snapshot.models]},
+        "image": [model.id for model in snapshot.models if model.supports_vision],
+        "audio": [model.id for model in snapshot.audio],
+        "embedding": [model.id for model in snapshot.embeddings],
     }

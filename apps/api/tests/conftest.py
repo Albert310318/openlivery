@@ -41,6 +41,32 @@ def immediate_replies(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def fixed_model_catalog():
+    """A known catalog, so no test reads OpenRouter and the prices the cost
+    reports are asserted against stay put."""
+    from app.services import model_catalog as catalog
+
+    chat = [
+        catalog.ModelInfo("openai/gpt-5.6-luna", "openai", "GPT-5.6 Luna", "openai", 1_050_000, 128_000, True, True, 0.0002, 0.0012),
+        catalog.ModelInfo("openai/gpt-5.6-sol", "openai", "GPT-5.6 Sol", "openai", 1_050_000, 128_000, True, True, 0.001, 0.004),
+        catalog.ModelInfo("openai/gpt-4.1", "openai", "GPT-4.1", "openai", 1_047_576, 32_768, True, True, 0.002, 0.008),
+        catalog.ModelInfo("deepseek/deepseek-v4-flash", "deepseek", "DeepSeek V4 Flash", "deepseek", 128_000, 8_192, True, False, 0.0001, 0.0002),
+        catalog.ModelInfo("anthropic/claude-sonnet-5", "anthropic", "Claude Sonnet 5", "anthropic", 1_000_000, 64_000, True, True, 0.003, 0.015),
+    ]
+    embeddings = [
+        catalog.EmbeddingModelInfo("openai/text-embedding-3-small", "openai", "text-embedding-3-small", 8_192, 0.00002),
+        catalog.EmbeddingModelInfo("openai/text-embedding-3-large", "openai", "text-embedding-3-large", 8_192, 0.00013),
+    ]
+    audio = [
+        catalog.ModelInfo("openai/gpt-4o-mini-transcribe", "openai", "GPT-4o mini Transcribe", "transcribe", 16_000, 2_000, False, False, 0.003, 0.005),
+        catalog.ModelInfo("openai/gpt-4o-transcribe", "openai", "GPT-4o Transcribe", "transcribe", 16_000, 2_000, False, False, 0.006, 0.01),
+    ]
+    catalog.set_snapshot(chat, embeddings, audio=audio)
+    yield
+    catalog._current = None
+
+
+@pytest.fixture(autouse=True)
 def clean_database():
     Base.metadata.drop_all(test_engine)
     Base.metadata.create_all(test_engine)

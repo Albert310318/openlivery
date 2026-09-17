@@ -136,7 +136,7 @@ def test_reindex_single_document(authenticated_client: TestClient, monkeypatch):
 
 def test_catalog_lists_embedding_models(authenticated_client: TestClient):
     models = authenticated_client.get("/api/catalog/embedding-models").json()
-    assert models[0]["id"] == "openai/text-embedding-3-small"
+    assert "openai/text-embedding-3-small" in [m["id"] for m in models]
     assert all(m["context_window"] >= 2048 for m in models)
     available = authenticated_client.get("/api/catalog/available").json()
     assert "openai/text-embedding-3-small" in available["embedding"]

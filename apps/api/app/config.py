@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     # upload the sample file of a template header: Meta files uploads under
     # the app, not the business account.
     whatsapp_app_id: str = ""
+    # Speech-to-text models offered for the audio capability. OpenRouter serves
+    # them through its audio endpoint but lists them nowhere its API exposes,
+    # so the offer is declared here; every other model is read live.
+    transcription_models: str = "openai/gpt-4o-mini-transcribe,openai/gpt-4o-transcribe,openai/gpt-transcribe"
     # Official messaging APIs. App credentials remain on the server.
     social_graph_version: str = "v25.0"
     social_worker_enabled: bool = True

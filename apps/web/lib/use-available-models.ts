@@ -1,11 +1,13 @@
 "use client";
 
-// Which models this workspace can actually pick, asked from the API so a
-// deployment can narrow the offer (a stock install returns the full catalog).
-// While loading or on error the static lists apply unchanged.
+// Which models this workspace can actually pick, asked from the API: the
+// catalog is what OpenRouter serves right now, and a deployment may narrow it
+// (the cloud does, to what its platform credit covers). While loading or on
+// error the static seed lists apply unchanged.
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { setLiveModels, type LiveModel } from "@/lib/providers";
 
 export type AvailableModels = {
   chat: Record<string, string[]>;
@@ -15,10 +17,17 @@ export type AvailableModels = {
 };
 
 let cached: AvailableModels | null = null;
+let metadataLoaded = false;
 
 export function useAvailableModels(): AvailableModels | null {
   const [data, setData] = useState<AvailableModels | null>(cached);
   useEffect(() => {
+    // Names, context windows and prices for every model on offer, so the
+    // pickers can label what they list.
+    if (!metadataLoaded) {
+      metadataLoaded = true;
+      api<LiveModel[]>("/catalog/models").then(setLiveModels).catch(() => { metadataLoaded = false; });
+    }
     if (cached) return;
     api<AvailableModels>("/catalog/available")
       .then((payload) => {
@@ -30,11 +39,14 @@ export function useAvailableModels(): AvailableModels | null {
   return data;
 }
 
-/** Intersect a static list with the allowed ids; an unknown or empty answer
- * keeps the full list, so the UI never ends up with nothing to offer. */
+/** The ids the API allows, with the ones the static seed knows first (they
+ * carry curated labels and the recommended default), then everything else
+ * OpenRouter serves. An unknown or empty answer keeps the static list, so the
+ * UI never ends up with nothing to offer. */
 export function narrowModels(list: readonly string[], allowed?: string[] | null): string[] {
   if (!allowed || !allowed.length) return [...list];
   const set = new Set(allowed);
-  const kept = list.filter((id) => set.has(id));
-  return kept.length ? kept : [...list];
+  const known = list.filter((id) => set.has(id));
+  const knownSet = new Set(known);
+  return [...known, ...allowed.filter((id) => !knownSet.has(id))];
 }
