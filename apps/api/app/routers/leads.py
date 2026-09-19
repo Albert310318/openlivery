@@ -21,11 +21,14 @@ router = APIRouter(prefix="/leads", tags=["Leads"])
 
 
 def _lead(db: Session, user: User, lead_id: uuid.UUID) -> Lead:
-    lead = db.scalar(
+    query = (
         select(Lead)
         .options(selectinload(Lead.conversations).joinedload(LeadConversation.conversation))
-        .where(Lead.id == lead_id, Lead.agency_id == user.agency_id)
+        .where(Lead.id == lead_id)
     )
+    if not user.is_vendiq_admin:
+        query = query.where(Lead.agency_id == user.agency_id)
+    lead = db.scalar(query)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     return lead
@@ -55,7 +58,9 @@ def list_leads(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    query = select(Lead).where(Lead.agency_id == user.agency_id)
+    query = select(Lead)
+    if not user.is_vendiq_admin:
+        query = query.where(Lead.agency_id == user.agency_id)
     if client_id:
         query = query.where(Lead.client_id == client_id)
     if status:
