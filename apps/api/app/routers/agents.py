@@ -21,36 +21,45 @@ MAX_PDF_BYTES = 20 * 1024 * 1024
 
 
 def _agent(db: Session, user: User, agent_id: uuid.UUID) -> Agent:
-    agent = db.scalar(
+    query = (
         select(Agent)
         .options(joinedload(Agent.client).selectinload(Client.agents))
-        .where(Agent.id == agent_id, Agent.agency_id == user.agency_id)
+        .where(Agent.id == agent_id)
     )
+    if not user.is_vendiq_admin:
+        query = query.where(Agent.agency_id == user.agency_id)
+    agent = db.scalar(query)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     return agent
 
 
-def _validate_client(db: Session, user: User, client_id: uuid.UUID) -> None:
-    client = db.scalar(select(Client).where(Client.id == client_id, Client.agency_id == user.agency_id))
+def _validate_client(db: Session, user: User, client_id: uuid.UUID) -> Client:
+    query = select(Client).where(Client.id == client_id)
+    if not user.is_vendiq_admin:
+        query = query.where(Client.agency_id == user.agency_id)
+    client = db.scalar(query)
     if not client:
         raise HTTPException(status_code=400, detail="The selected client does not exist")
+    return client
 
 
 @router.get("", response_model=list[AgentOut])
 def list_agents(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return db.scalars(
+    query = (
         select(Agent)
         .options(joinedload(Agent.client).selectinload(Client.agents))
-        .where(Agent.agency_id == user.agency_id)
         .order_by(Agent.created_at.desc())
-    ).unique().all()
+    )
+    if not user.is_vendiq_admin:
+        query = query.where(Agent.agency_id == user.agency_id)
+    return db.scalars(query).unique().all()
 
 
 @router.post("", response_model=AgentOut, status_code=status.HTTP_201_CREATED)
 def create_agent(payload: AgentCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    _validate_client(db, user, payload.client_id)
-    agent = Agent(agency_id=user.agency_id, **payload.model_dump())
+    client = _validate_client(db, user, payload.client_id)
+    agent = Agent(agency_id=client.agency_id, **payload.model_dump())
     db.add(agent)
     db.commit()
     return _agent(db, user, agent.id)
@@ -71,9 +80,11 @@ def update_agent(agent_id: uuid.UUID, payload: AgentUpdate, db: Session = Depend
             status_code=409,
             detail="This agent is assigned to WhatsApp. Assign another agent to the channel before changing its client.",
         )
-    _validate_client(db, user, client_id)
+    client = _validate_client(db, user, client_id)
     for key, value in values.items():
         setattr(agent, key, value)
+    if client_id != agent.client_id or agent.agency_id != client.agency_id:
+        agent.agency_id = client.agency_id
     db.commit()
     return _agent(db, user, agent_id)
 
