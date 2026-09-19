@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ...models import Agent, AgentTool
+from ...models import Agent, AgentTool, Lead, LeadConversation, Message
 from ..ai import Completion, chat_completion
 from ..leads import LeadContext, trusted_whatsapp_phone
 from ..lead_handoffs import handoff_available
@@ -49,6 +49,61 @@ def _with_lead_rules(messages: list[dict], rules: str) -> list[dict]:
             amended[index] = {**message, "content": f"{message['content']}\n\n{rules}"}
             return amended
     return [{"role": "system", "content": rules}, *amended]
+
+
+def _sales_qualification_rules(db: Session, agent: Agent, context: LeadContext) -> str:
+    """Guide WhatsApp sales agents to qualify progressively before handoff."""
+    if context.channel not in ("whatsapp", "whatsapp_cloud"):
+        return ""
+
+    lead = db.scalar(
+        select(Lead)
+        .join(LeadConversation)
+        .where(LeadConversation.conversation_id == context.conversation_id)
+    )
+    known: list[str] = []
+    missing: list[str] = []
+    fields = (
+        ("name", "nombre"),
+        ("interest", "interés"),
+        ("budget", "presupuesto"),
+        ("preferred_contact_time", "horario preferido de contacto"),
+    )
+    for attr, label in fields:
+        value = getattr(lead, attr, None) if lead else None
+        (known if value else missing).append(label)
+
+    assistant_count = db.scalar(
+        select(func.count(Message.id)).where(
+            Message.conversation_id == context.conversation_id,
+            Message.role == "assistant",
+        )
+    ) or 0
+
+    intro = (
+        f"Esta es la primera respuesta del agente en esta conversación. Preséntate brevemente como {agent.name}, "
+        f"asesora virtual de {agent.client.name}, antes de continuar. "
+        if assistant_count == 0
+        else ""
+    )
+    known_text = ", ".join(known) if known else "ninguno"
+    missing_text = ", ".join(missing) if missing else "ninguno"
+
+    return (
+        "Flujo comercial por WhatsApp: responde primero la pregunta actual del prospecto y luego continúa "
+        "la conversación para completar la calificación, sin convertir la respuesta en un formulario. "
+        f"{intro}"
+        f"Datos ya registrados: {known_text}. Datos aún faltantes: {missing_text}. "
+        "Haz como máximo una pregunta de calificación por turno, priorizando en este orden: nombre, interés, "
+        "presupuesto y horario preferido de contacto. No vuelvas a preguntar datos ya registrados. "
+        "El número de WhatsApp ya es una identidad válida del contacto: no pidas su teléfono solo para crear el lead. "
+        "Cuando el prospecto aporte un dato nuevo, llama create_or_update_lead en ese mismo turno con evidencia literal. "
+        "El lead debe existir desde el contacto por WhatsApp; aceptar hablar con un asesor NO es requisito para ser lead. "
+        "No ofrezcas ni notifiques al asesor antes de intentar completar nombre, interés, presupuesto y horario de contacto, "
+        "salvo que el prospecto pida explícitamente hablar con un asesor. Si el prospecto rechaza proporcionar un dato, "
+        "no insistas repetidamente: continúa ayudando y registra los datos que sí entregue. "
+        "Cuando ya exista información suficiente y corresponda el handoff, pide una confirmación clara antes de notificar al asesor."
+    )
 
 
 async def run_completion(
@@ -111,6 +166,9 @@ async def run_completion(
             lead_rules = f"{lead_rules} {TRUSTED_WHATSAPP_LEAD_RULE}"
         if handoff_available(db, tool_context):
             lead_rules = f"{lead_rules} {SALES_ADVISOR_RULES}"
+        qualification_rules = _sales_qualification_rules(db, agent, tool_context)
+        if qualification_rules:
+            lead_rules = f"{lead_rules} {qualification_rules}"
         messages = _with_lead_rules(messages, lead_rules)
     if not specs:
         return await chat_completion(agent.provider, base_url, api_key, model, messages, temperature=temperature, max_tokens=max_tokens)
