@@ -105,8 +105,95 @@ def _valid_lead_phone(lead: Lead) -> str | None:
     return None
 
 
+def _new_lead_message_text(client: Client, lead: Lead, initial_message: str) -> str:
+    phone = _valid_lead_phone(lead) or "Por confirmar"
+    name = (lead.name or "").strip() or "Por confirmar"
+    inquiry = " ".join((initial_message or "").split())
+    if len(inquiry) > 700:
+        inquiry = inquiry[:697] + "..."
+    lines = [
+        f"🔔 Nuevo lead – {client.name}",
+        "",
+        f"Nombre: {name}",
+        f"WhatsApp: {phone}",
+    ]
+    if inquiry:
+        lines.append(f"Consulta inicial: {inquiry}")
+    if lead.interest:
+        lines.append(f"Interés: {lead.interest.strip()}")
+    lines.extend([
+        f"Estado: {lead.status}",
+        "",
+        "⏳ El agente IA continúa calificando al prospecto.",
+        "Aún no implica autorización para que el asesor contacte al prospecto.",
+    ])
+    return "\n".join(lines)
+
+
+async def notify_new_lead(
+    db: Session,
+    context: LeadContext,
+    lead: Lead,
+    initial_message: str,
+) -> dict:
+    """Notify the configured advisor once, immediately after a new WhatsApp lead is registered."""
+    if lead.advisor_notified_at:
+        return {"ok": True, "duplicate": True, "status": "sent"}
+
+    conversation = db.scalar(
+        select(Conversation).where(
+            Conversation.id == context.conversation_id,
+            Conversation.agency_id == context.agency_id,
+            Conversation.client_id == context.client_id,
+            Conversation.agent_id == context.agent_id,
+            Conversation.channel == "whatsapp",
+        )
+    )
+    client = db.scalar(
+        select(Client).where(
+            Client.id == context.client_id,
+            Client.agency_id == context.agency_id,
+        )
+    )
+    channel = None
+    if conversation and conversation.whatsapp_channel_id:
+        channel = db.scalar(
+            select(WhatsAppChannel).where(
+                WhatsAppChannel.id == conversation.whatsapp_channel_id,
+                WhatsAppChannel.agency_id == context.agency_id,
+                WhatsAppChannel.client_id == context.client_id,
+                WhatsAppChannel.agent_id == context.agent_id,
+                WhatsAppChannel.is_enabled.is_(True),
+                WhatsAppChannel.status == "connected",
+            )
+        )
+
+    if not client or not client.sales_advisor_phone or not channel:
+        return {"ok": False, "skipped": True, "reason": "advisor_not_configured_or_channel_unavailable"}
+
+    try:
+        remote_jid = f"{client.sales_advisor_phone.lstrip('+')}@s.whatsapp.net"
+        result = await bridge_command(
+            "POST",
+            f"/channels/{channel.id}/send",
+            {
+                "remote_jid": remote_jid,
+                "text": _new_lead_message_text(client, lead, initial_message),
+            },
+        )
+        lead.advisor_notified_at = now_utc()
+        lead.advisor_notification_external_message_id = result.get("external_message_id")
+        lead.advisor_notification_error = None
+        db.commit()
+        return {"ok": True, "duplicate": False, "status": "sent"}
+    except HTTPException as exc:
+        lead.advisor_notification_error = str(exc.detail)[:1000]
+        db.commit()
+        return {"ok": False, "duplicate": False, "status": "failed"}
+
+
 def _message_text(lead: Lead, trusted_phone: str | None = None) -> str:
-    lines = ["🔔 Nuevo lead autorizado para contacto", ""]
+    lines = ["✅ Lead listo para contacto", ""]
     fields = (
         ("Nombre", lead.name),
         ("Teléfono", _valid_lead_phone(lead) or trusted_phone),
