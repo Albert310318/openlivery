@@ -95,12 +95,12 @@ def dashboard_metrics(
     start_date = (now_utc() - timedelta(days=days - 1)).date()
     since = now_utc() - timedelta(days=days)
 
-    messages = db.scalar(
+    messages_query = (
         select(func.count(Message.id))
         .join(Conversation, Message.conversation_id == Conversation.id)
         .where(Message.created_at >= since)
     )
-    messages = db.scalar(_scope(messages, Conversation.agency_id, user)) or 0
+    messages = db.scalar(_scope(messages_query, Conversation.agency_id, user)) or 0
     human_query = select(func.count(Conversation.id)).where(
         Conversation.mode == "human", Conversation.created_at >= since
     )
