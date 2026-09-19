@@ -136,12 +136,16 @@ def trusted_whatsapp_phone(db: Session, context: LeadContext) -> str | None:
         return None
 
 
-def ensure_whatsapp_contact_lead(db: Session, context: LeadContext) -> Lead | None:
-    """Create or reuse a lead for a trusted WhatsApp contact and link the conversation."""
+def ensure_whatsapp_contact_lead(db: Session, context: LeadContext) -> tuple[Lead | None, bool]:
+    """Create or reuse a lead for a trusted WhatsApp contact and link the conversation.
+
+    Returns (lead, created) so callers can trigger one-time actions only for a
+    genuinely new prospect record.
+    """
     _validated_conversation(db, context)
     trusted_phone = trusted_whatsapp_phone(db, context)
     if not trusted_phone:
-        return None
+        return None, False
 
     linked = db.scalar(
         select(Lead)
@@ -153,7 +157,7 @@ def ensure_whatsapp_contact_lead(db: Session, context: LeadContext) -> Lead | No
         )
     )
     if linked:
-        return linked
+        return linked, False
 
     lead = db.scalar(
         select(Lead).where(
@@ -162,7 +166,8 @@ def ensure_whatsapp_contact_lead(db: Session, context: LeadContext) -> Lead | No
             Lead.phone_normalized == trusted_phone,
         )
     )
-    if lead is None:
+    created = lead is None
+    if created:
         lead = Lead(
             agency_id=context.agency_id,
             client_id=context.client_id,
@@ -183,8 +188,7 @@ def ensure_whatsapp_contact_lead(db: Session, context: LeadContext) -> Lead | No
     elif link.lead_id != lead.id:
         raise LeadIdentityConflict("The conversation is already associated with another lead")
 
-    return lead
-
+    return lead, created
 
 def create_or_update_lead(
     db: Session,
