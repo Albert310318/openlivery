@@ -14,51 +14,53 @@ router = APIRouter(prefix="/dashboard", tags=["Inicio"])
 LEAD_STATUSES = ("new", "qualified", "follow_up", "won", "lost")
 
 
+def _scope(stmt, column, user: User):
+    return stmt if user.is_vendiq_admin else stmt.where(column == user.agency_id)
+
+
 @router.get("", response_model=DashboardOut)
 def dashboard(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    agency_id = user.agency_id
-    clients = db.scalar(select(func.count(Client.id)).where(Client.agency_id == agency_id)) or 0
+    clients = db.scalar(_scope(select(func.count(Client.id)), Client.agency_id, user)) or 0
     active_clients = db.scalar(
-        select(func.count(Client.id)).where(Client.agency_id == agency_id, Client.is_active.is_(True))
+        _scope(select(func.count(Client.id)).where(Client.is_active.is_(True)), Client.agency_id, user)
     ) or 0
-    agents = db.scalar(select(func.count(Agent.id)).where(Agent.agency_id == agency_id)) or 0
+    agents = db.scalar(_scope(select(func.count(Agent.id)), Agent.agency_id, user)) or 0
     active_agents = db.scalar(
-        select(func.count(Agent.id)).where(Agent.agency_id == agency_id, Agent.is_active.is_(True))
+        _scope(select(func.count(Agent.id)).where(Agent.is_active.is_(True)), Agent.agency_id, user)
     ) or 0
-    conversations = db.scalar(
-        select(func.count(Conversation.id)).where(Conversation.agency_id == agency_id)
-    ) or 0
-    channels = db.scalar(
-        select(func.count(WhatsAppChannel.id)).where(WhatsAppChannel.agency_id == agency_id)
-    ) or 0
+    conversations = db.scalar(_scope(select(func.count(Conversation.id)), Conversation.agency_id, user)) or 0
+    channels = db.scalar(_scope(select(func.count(WhatsAppChannel.id)), WhatsAppChannel.agency_id, user)) or 0
     connected_channels = db.scalar(
-        select(func.count(WhatsAppChannel.id)).where(
-            WhatsAppChannel.agency_id == agency_id,
-            WhatsAppChannel.status == "connected",
+        _scope(
+            select(func.count(WhatsAppChannel.id)).where(WhatsAppChannel.status == "connected"),
+            WhatsAppChannel.agency_id,
+            user,
         )
     ) or 0
-    recent_agents = db.scalars(
-        select(Agent).where(Agent.agency_id == agency_id).order_by(Agent.created_at.desc()).limit(5)
-    ).all()
+    recent_agents_query = select(Agent).order_by(Agent.created_at.desc()).limit(5)
+    recent_agents = db.scalars(_scope(recent_agents_query, Agent.agency_id, user)).all()
     lead_rows = db.execute(
-        select(Lead.status, func.count(Lead.id))
-        .where(Lead.agency_id == agency_id)
-        .group_by(Lead.status)
+        _scope(
+            select(Lead.status, func.count(Lead.id)).group_by(Lead.status),
+            Lead.agency_id,
+            user,
+        )
     ).all()
     leads_by_status = {status: 0 for status in LEAD_STATUSES}
     leads_by_status.update({status: count for status, count in lead_rows})
     total_leads = sum(leads_by_status.values())
     conversion_rate = round((leads_by_status["won"] / total_leads) * 100, 1) if total_leads else 0.0
     current_time = now_utc()
-    follow_up_rows = db.scalars(
+    follow_up_query = (
         select(Lead)
-        .where(Lead.agency_id == agency_id, Lead.next_follow_up_at.is_not(None))
+        .where(Lead.next_follow_up_at.is_not(None))
         .order_by(
             case((Lead.next_follow_up_at < current_time, 0), else_=1),
             Lead.next_follow_up_at.asc(),
         )
         .limit(5)
-    ).all()
+    )
+    follow_up_rows = db.scalars(_scope(follow_up_query, Lead.agency_id, user)).all()
     return {
         "clients": clients,
         "active_clients": active_clients,
@@ -90,68 +92,66 @@ def dashboard_metrics(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    agency_id = user.agency_id
     start_date = (now_utc() - timedelta(days=days - 1)).date()
     since = now_utc() - timedelta(days=days)
 
     messages = db.scalar(
         select(func.count(Message.id))
         .join(Conversation, Message.conversation_id == Conversation.id)
-        .where(Conversation.agency_id == agency_id, Message.created_at >= since)
-    ) or 0
-    human_conversations = db.scalar(
-        select(func.count(Conversation.id)).where(
-            Conversation.agency_id == agency_id, Conversation.mode == "human", Conversation.created_at >= since
-        )
-    ) or 0
+        .where(Message.created_at >= since)
+    )
+    messages = db.scalar(_scope(messages, Conversation.agency_id, user)) or 0
+    human_query = select(func.count(Conversation.id)).where(
+        Conversation.mode == "human", Conversation.created_at >= since
+    )
+    human_conversations = db.scalar(_scope(human_query, Conversation.agency_id, user)) or 0
 
-    channel_rows = db.execute(
+    channel_query = (
         select(Conversation.channel, func.count(Conversation.id))
-        .where(Conversation.agency_id == agency_id, Conversation.created_at >= since)
+        .where(Conversation.created_at >= since)
         .group_by(Conversation.channel)
-    ).all()
+    )
+    channel_rows = db.execute(_scope(channel_query, Conversation.agency_id, user)).all()
     by_channel = {channel: count for channel, count in channel_rows}
 
     # New conversations per day over the selected window (zero-filled).
     day = func.date(Conversation.created_at)
-    daily_rows = db.execute(
-        select(day, func.count(Conversation.id))
-        .where(Conversation.agency_id == agency_id, day >= start_date)
-        .group_by(day)
-    ).all()
+    daily_query = select(day, func.count(Conversation.id)).where(day >= start_date).group_by(day)
+    daily_rows = db.execute(_scope(daily_query, Conversation.agency_id, user)).all()
     counts = {str(d): c for d, c in daily_rows}
     daily_conversations = [
         {"date": (start_date + timedelta(days=i)).isoformat(), "count": counts.get((start_date + timedelta(days=i)).isoformat(), 0)}
         for i in range(days)
     ]
 
-    top_rows = db.execute(
+    top_query = (
         select(Agent.id, Agent.name, func.count(Conversation.id))
         .join(Conversation, Conversation.agent_id == Agent.id)
-        .where(Agent.agency_id == agency_id, Conversation.created_at >= since)
+        .where(Conversation.created_at >= since)
         .group_by(Agent.id, Agent.name)
         .order_by(func.count(Conversation.id).desc())
         .limit(5)
-    ).all()
+    )
+    top_rows = db.execute(_scope(top_query, Agent.agency_id, user)).all()
     top_agents = [{"id": aid, "name": name, "conversations": count} for aid, name, count in top_rows]
 
-    tokens_in, tokens_out = db.execute(
-        select(
-            func.coalesce(func.sum(UsageRecord.input_tokens), 0),
-            func.coalesce(func.sum(UsageRecord.output_tokens), 0),
-        ).where(UsageRecord.agency_id == agency_id, UsageRecord.created_at >= since)
-    ).one()
-    usage_rows = db.execute(
+    usage_total_query = select(
+        func.coalesce(func.sum(UsageRecord.input_tokens), 0),
+        func.coalesce(func.sum(UsageRecord.output_tokens), 0),
+    ).where(UsageRecord.created_at >= since)
+    tokens_in, tokens_out = db.execute(_scope(usage_total_query, UsageRecord.agency_id, user)).one()
+    usage_query = (
         select(
             UsageRecord.model,
             func.coalesce(func.sum(UsageRecord.input_tokens), 0),
             func.coalesce(func.sum(UsageRecord.output_tokens), 0),
         )
-        .where(UsageRecord.agency_id == agency_id, UsageRecord.created_at >= since)
+        .where(UsageRecord.created_at >= since)
         .group_by(UsageRecord.model)
         .order_by((func.sum(UsageRecord.input_tokens) + func.sum(UsageRecord.output_tokens)).desc())
         .limit(6)
-    ).all()
+    )
+    usage_rows = db.execute(_scope(usage_query, UsageRecord.agency_id, user)).all()
     usage_by_model = [{"model": model, "input_tokens": input_tokens, "output_tokens": output_tokens} for model, input_tokens, output_tokens in usage_rows]
 
     return {
