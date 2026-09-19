@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..config import trial_activation_eligible_since
 from ..models import Agent, Conversation, Message, now_utc
 from .knowledge import build_system_prompt, retrieve_knowledge
+from .lead_handoffs import notify_new_lead
 from .leads import ensure_whatsapp_contact_lead, lead_context_from_conversation
 from .media import describe_image, transcribe_audio
 from .providers import resolve_agent_credentials, resolve_provider_credentials
@@ -202,12 +203,26 @@ async def process_inbound(
         conversation,
         trusted_sender_jid=inbound.trusted_sender_jid,
     )
+    lead = None
+    lead_created = False
     try:
-        ensure_whatsapp_contact_lead(db, lead_context)
+        lead, lead_created = ensure_whatsapp_contact_lead(db, lead_context)
         db.commit()
     except Exception:
         logger.exception("Could not ensure WhatsApp lead for conversation_id=%s", conversation.id)
         db.rollback()
+
+    if lead_created and lead is not None:
+        try:
+            notification = await notify_new_lead(db, lead_context, lead, content)
+            if not notification.get("ok") and not notification.get("skipped"):
+                logger.warning(
+                    "Initial advisor notification failed for lead_id=%s status=%s",
+                    lead.id,
+                    notification.get("status"),
+                )
+        except Exception:
+            logger.exception("Could not notify advisor for new lead_id=%s", lead.id)
 
     if conversation.mode == "human":
         return InboundResult(accepted=True, conversation_id=conversation.id, mode="human")
