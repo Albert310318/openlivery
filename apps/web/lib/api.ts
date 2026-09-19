@@ -6,9 +6,11 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  retryAfter?: number;
+  constructor(message: string, status: number, retryAfter?: number) {
     super(message);
     this.status = status;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -39,7 +41,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
         message = `Revisa los campos del formulario: ${data.detail[0].msg}`;
       }
     } catch {}
-    throw new ApiError(message, response.status);
+    throw new ApiError(message, response.status, Number(response.headers.get("Retry-After")) || undefined);
   }
   if (response.status === 204) return undefined as T;
   return response.json();

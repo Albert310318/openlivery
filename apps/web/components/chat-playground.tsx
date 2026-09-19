@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bot, FileText, ImageIcon, LoaderCircle, MessageSquarePlus, Send, Sparkles, TriangleAlert, UserRound, Wrench } from "lucide-react";
 import { api, messageFrom } from "@/lib/api";
+import { accessibleClients } from "@/lib/clients";
 import { Alert, EmptyState } from "@/components/ui";
 import { ListRowsSkeleton } from "@/components/skeleton";
 import { useToast } from "@/components/toast";
@@ -27,7 +28,7 @@ export function ChatPlayground({ lockedAgentId }: { lockedAgentId?: string }) {
   const imageRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    Promise.all([api<Client[]>("/clients"), api<Agent[]>("/agents"), api<Provider[]>("/providers")]).then(([c, a, p]) => {
+    Promise.all([accessibleClients(), api<Agent[]>("/agents"), api<Provider[]>("/providers")]).then(([c, a, p]) => {
       setClients(c); setAgents(a); setProviders(p);
       const initial = lockedAgentId ? a.find((item) => item.id === lockedAgentId) : a[0];
       if (initial) { setAgentId(initial.id); setClientId(initial.client_id); }
@@ -43,6 +44,34 @@ export function ChatPlayground({ lockedAgentId }: { lockedAgentId?: string }) {
       else setConversation(null);
     });
   }, [agentId]);
+
+  const refreshAfterReturn = useCallback(async () => {
+    const selectedConversationId = conversation?.id;
+    const [freshAgents, freshProviders, freshConversation] = await Promise.all([
+      api<Agent[]>("/agents"),
+      api<Provider[]>("/providers"),
+      selectedConversationId ? api<Conversation>(`/conversations/${selectedConversationId}`) : Promise.resolve(null),
+    ]);
+    setAgents(freshAgents);
+    setProviders(freshProviders);
+    if (freshConversation) setConversation(freshConversation);
+  }, [conversation?.id]);
+
+  useEffect(() => {
+    let refreshing = false;
+    const refresh = () => {
+      if (refreshing) return;
+      refreshing = true;
+      refreshAfterReturn().catch(() => {}).finally(() => { refreshing = false; });
+    };
+    const onVisibilityChange = () => { if (document.visibilityState === "visible") refresh(); };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [refreshAfterReturn]);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [conversation?.messages?.length]);
 
   const availableAgents = useMemo(() => agents.filter((agent) => agent.client_id === clientId), [agents, clientId]);
@@ -50,6 +79,7 @@ export function ChatPlayground({ lockedAgentId }: { lockedAgentId?: string }) {
   const needsKey = Boolean(selectedAgent) && !providers.find((item) => item.provider === selectedAgent!.provider)?.configured;
   const needsModel = Boolean(selectedAgent) && !selectedAgent!.model.trim();
   const agentReady = Boolean(selectedAgent) && !needsKey && !needsModel;
+  const composerDisabled = !agentId || !agentReady || conversation?.mode === "human";
 
   async function newConversation() {
     if (!agentId) return;
@@ -110,7 +140,7 @@ export function ChatPlayground({ lockedAgentId }: { lockedAgentId?: string }) {
         {busy && <div className="message-row assistant"><span className="message-avatar"><Bot size={17} /></span><div className="thinking"><i /><i /><i /></div></div>}
         <div ref={endRef} />
       </div>
-      <div className="composer-wrap">{needsKey ? <Alert type="info">{t("playground.notReady.keyPrefix")}<Link href="/settings">{t("playground.notReady.settingsLink")}</Link>.</Alert> : needsModel ? <Alert type="info">{t("playground.notReady.modelPrefix")}<Link href={`/agents/${agentId}`}>{t("playground.notReady.modelLink")}</Link>.</Alert> : null}<form className="composer" onSubmit={send}>{selectedAgent?.image_enabled && <><button type="button" className="composer-attach" disabled={!agentId || busy || !agentReady} title={t("playground.composer.attachImage")} aria-label={t("playground.composer.attachImage")} onClick={() => imageRef.current?.click()}><ImageIcon size={18} /></button><input ref={imageRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={(e) => sendImage(e.target.files?.[0])} /></>}<textarea ref={composerRef} name="message" rows={1} placeholder={agentId ? t("playground.composer.placeholder") : t("playground.composer.placeholderNoAgent")} disabled={!agentId || !agentReady} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /><button disabled={!agentId || busy || !agentReady} aria-label={t("playground.composer.send")}>{busy ? <LoaderCircle className="spin" size={18} /> : <Send size={18} />}</button></form><small>{t("playground.composer.disclaimer")}</small></div>
+      <div className="composer-wrap">{needsKey ? <Alert type="info">{t("playground.notReady.keyPrefix")}<Link href="/settings">{t("playground.notReady.settingsLink")}</Link>.</Alert> : needsModel ? <Alert type="info">{t("playground.notReady.modelPrefix")}<Link href={`/agents/${agentId}`}>{t("playground.notReady.modelLink")}</Link>.</Alert> : null}<form className="composer" onSubmit={send}>{selectedAgent?.image_enabled && <><button type="button" className="composer-attach" disabled={composerDisabled || busy} title={t("playground.composer.attachImage")} aria-label={t("playground.composer.attachImage")} onClick={() => imageRef.current?.click()}><ImageIcon size={18} /></button><input ref={imageRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={(e) => sendImage(e.target.files?.[0])} /></>}<textarea ref={composerRef} name="message" rows={1} placeholder={agentId ? t("playground.composer.placeholder") : t("playground.composer.placeholderNoAgent")} disabled={composerDisabled} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /><button disabled={composerDisabled || busy} aria-label={t("playground.composer.send")}>{busy ? <LoaderCircle className="spin" size={18} /> : <Send size={18} />}</button></form><small>{t("playground.composer.disclaimer")}</small></div>
     </section>
   </div>;
 }

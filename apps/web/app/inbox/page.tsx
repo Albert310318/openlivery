@@ -63,8 +63,23 @@ export default function InboxPage() {
   }, [agentId, channel, tab, search]);
 
   const selectedIdRef = useRef<string | null>(null);
+  const deepLinkHandledRef = useRef(false);
   const messagesRef = useRef<HTMLDivElement>(null);
   useEffect(() => { selectedIdRef.current = selected?.id ?? null; }, [selected]);
+  useEffect(() => {
+    if (deepLinkHandledRef.current) return;
+    deepLinkHandledRef.current = true;
+    const conversationId = new URLSearchParams(window.location.search).get("conversation_id");
+    if (!conversationId) return;
+    selectedIdRef.current = conversationId;
+    api<Conversation>(`/conversations/${encodeURIComponent(conversationId)}`)
+      .then((conversation) => {
+        setSelected(conversation);
+        setItems((rows) => rows.map((row) => row.id === conversationId ? { ...row, unread: false, unread_count: 0 } : row));
+        api(`/conversations/${encodeURIComponent(conversationId)}/read`, { method: "POST" }).catch(() => {});
+      })
+      .catch((error) => toast.error(messageFrom(error)));
+  }, [toast]);
   const wasNearBottomRef = useRef(true);
   useEffect(() => {
     const el = messagesRef.current;
@@ -203,9 +218,18 @@ export default function InboxPage() {
         {!selected ? <div className="empty-state"><div className="empty-icon"><InboxIcon /></div><h3>{t("inbox.empty")}</h3><p>{t("inbox.selectPrompt")}</p></div>
           : <>
             <header>
-              <div><strong>{selected.contact_name || selected.title}</strong><small>{channelLabel(selected.channel)}</small></div>
+              <div><strong>{selected.contact_name || selected.lead?.name || selected.title}</strong><small>{channelLabel(selected.channel)}</small></div>
               <button className={`mode-toggle ${selected.mode}`} onClick={() => toggleMode(selected.mode === "ai" ? "human" : "ai")}>{selected.mode === "ai" ? t("inbox.takeControl") : t("inbox.returnToAi")}</button>
             </header>
+            {selected.lead && <dl className="inbox-lead-summary">
+              <div><dt>Name</dt><dd>{selected.lead.name || "—"}</dd></div>
+              <div><dt>Phone</dt><dd>{selected.lead.phone || "—"}</dd></div>
+              <div><dt>Email</dt><dd>{selected.lead.email || "—"}</dd></div>
+              <div><dt>Interest</dt><dd>{selected.lead.interest || "—"}</dd></div>
+              <div><dt>Budget</dt><dd>{selected.lead.budget || "—"}</dd></div>
+              <div><dt>Preferred contact time</dt><dd>{selected.lead.preferred_contact_time || "—"}</dd></div>
+              <div><dt>Status</dt><dd>{selected.lead.status}</dd></div>
+            </dl>}
             <div className="inbox-messages" ref={messagesRef}>
               {selected.messages?.map((message) => (
                 <div key={message.id} className={`inbox-message ${message.role}`}>

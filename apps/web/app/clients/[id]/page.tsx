@@ -1,17 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { SubscriptionSummary } from "@/components/subscription-summary";
 import { FormEvent, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, Bot, Copy, ExternalLink, Globe2, Inbox, LoaderCircle, MessageCircle, QrCode, Radio, Save, Settings2, ShieldAlert, ShieldCheck, Trash2, UserRound } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bot, BookOpen, ContactRound, Copy, ExternalLink, Globe2, Inbox, LoaderCircle, MessageCircle, MessagesSquare, QrCode, Radio, Save, Settings2, ShieldAlert, ShieldCheck, Trash2, UserRound } from "lucide-react";
 import { EmptyState, StatusBadge } from "@/components/ui";
 import { FormSkeleton, ListRowsSkeleton } from "@/components/skeleton";
 import { useToast } from "@/components/toast";
 import { api, messageFrom } from "@/lib/api";
 import { useT } from "@/lib/i18n";
-import type { Client, ClientDomain, Conversation } from "@/types";
+import type { Client, ClientDomain, Conversation, Lead, User } from "@/types";
 
-type Tab = "details" | "agents" | "channels" | "inbox" | "portal";
+type Tab = "details" | "agents" | "channels" | "inbox" | "portal" | "plan";
 
 export default function ClientDetailPage() {
   const t = useT();
@@ -19,15 +20,28 @@ export default function ClientDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [client, setClient] = useState<Client | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [resourceCounts, setResourceCounts] = useState<{ leads: number; leadsCapped: boolean; conversations: number } | null>(null);
   const [tab, setTab] = useState<Tab>("details");
   const [busy, setBusy] = useState(false);
   const load = () => api<Client>(`/clients/${id}`).then(setClient);
   useEffect(() => { load(); }, [id]);
+  useEffect(() => { api<User>("/auth/me").then(setUser).catch(() => setUser(null)); }, []);
+  useEffect(() => {
+    Promise.all([
+      api<Lead[]>(`/leads?client_id=${encodeURIComponent(id)}&limit=100`),
+      api<Conversation[]>(`/conversations?client_id=${encodeURIComponent(id)}`),
+    ]).then(([leads, conversations]) => setResourceCounts({
+      leads: leads.length,
+      leadsCapped: leads.length === 100,
+      conversations: conversations.length,
+    })).catch(() => setResourceCounts(null));
+  }, [id]);
 
   async function saveDetails(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true);
     const data = new FormData(event.currentTarget);
-    try { setClient(await api<Client>(`/clients/${id}`, { method: "PATCH", body: JSON.stringify({ name: data.get("name"), industry: data.get("industry"), description: data.get("description"), general_context: data.get("general_context"), is_active: data.get("is_active") === "on" }) })); toast.success(t("clients.detail.detailsSaved")); }
+    try { setClient(await api<Client>(`/clients/${id}`, { method: "PATCH", body: JSON.stringify({ name: data.get("name"), industry: data.get("industry"), description: data.get("description"), general_context: data.get("general_context"), sales_advisor_phone: data.get("sales_advisor_phone") || null, is_active: data.get("is_active") === "on" }) })); toast.success(t("clients.detail.detailsSaved")); }
     catch (err) { toast.error(messageFrom(err)); } finally { setBusy(false); }
   }
 
@@ -37,7 +51,7 @@ export default function ClientDetailPage() {
     const payload: Record<string, unknown> = { portal_enabled: data.get("portal_enabled") === "on", portal_slug: data.get("portal_slug"), portal_title: data.get("portal_title"), portal_email: data.get("portal_email") || null };
     if (data.get("portal_password")) payload.portal_password = data.get("portal_password");
     try { setClient(await api<Client>(`/clients/${id}/portal`, { method: "PATCH", body: JSON.stringify(payload) })); toast.success(t("clients.detail.portalUpdated")); }
-    catch (err) { toast.error(messageFrom(err)); } finally { setBusy(false); }
+    catch (err) { toast.error(messageFrom(err)); await load(); } finally { setBusy(false); }
   }
 
   async function remove() {
@@ -48,13 +62,19 @@ export default function ClientDetailPage() {
   if (!client) return <div className="page"><FormSkeleton sections={2} /></div>;
   const portalUrl = `${typeof window === "undefined" ? "http://localhost:3000" : window.location.origin}/portal/${client.portal_slug}`;
   return <div className="page">
-    <Link href="/clients" className="back-link"><ArrowLeft size={17} /> {t("clients.detail.back")}</Link>
+    {user?.is_vendiq_admin === true && <Link href="/clients" className="back-link"><ArrowLeft size={17} /> {t("clients.detail.back")}</Link>}
     <header className="entity-header"><div className="entity-avatar xl">{client.name.slice(0, 2).toUpperCase()}</div><div><div className="title-line"><h1>{client.name}</h1><StatusBadge active={client.is_active} /></div><p>{client.industry || t("clients.detail.industryUndefined")} · {client.agents.length === 1 ? t("clients.detail.agentOne", { count: client.agents.length }) : t("clients.detail.agentMany", { count: client.agents.length })}</p></div><div className="header-actions"><Link href={`/agents/new?client=${client.id}`} className="button primary"><Bot size={17} /> {t("clients.detail.newAgent")}</Link></div></header>
-    <nav className="tabs client-tabs"><button className={tab === "details" ? "active" : ""} onClick={() => setTab("details")}><Settings2 size={17} /> {t("clients.detail.tabDetails")}</button><button className={tab === "agents" ? "active" : ""} onClick={() => setTab("agents")}><Bot size={17} /> {t("clients.detail.tabAgents")} <span>{client.agents.length}</span></button><button className={tab === "channels" ? "active" : ""} onClick={() => setTab("channels")}><Radio size={17} /> {t("clients.detail.tabChannels")}</button><button className={tab === "inbox" ? "active" : ""} onClick={() => setTab("inbox")}><Inbox size={17} /> {t("clients.detail.tabInbox")}</button><button className={tab === "portal" ? "active" : ""} onClick={() => setTab("portal")}><Globe2 size={17} /> {t("clients.detail.tabPortal")}</button></nav>
+    <nav className="tabs client-tabs"><button className={tab === "details" ? "active" : ""} onClick={() => setTab("details")}><Settings2 size={17} /> {t("clients.detail.tabDetails")}</button><button className={tab === "agents" ? "active" : ""} onClick={() => setTab("agents")}><Bot size={17} /> {t("clients.detail.tabAgents")} <span>{client.agents.length}</span></button><button className={tab === "channels" ? "active" : ""} onClick={() => setTab("channels")}><Radio size={17} /> {t("clients.detail.tabChannels")}</button><button className={tab === "inbox" ? "active" : ""} onClick={() => setTab("inbox")}><Inbox size={17} /> {t("clients.detail.tabInbox")}</button><button className={tab === "portal" ? "active" : ""} onClick={() => setTab("portal")}><Globe2 size={17} /> {t("clients.detail.tabPortal")}</button><button className={tab === "plan" ? "active" : ""} onClick={() => setTab("plan")}>{t("subscriptions.adminTitle")}</button></nav>
 
-    {tab === "details" && <form className="page-form" onSubmit={saveDetails}><section className="form-section"><div className="section-copy"><h2>{t("clients.detail.clientInfo")}</h2><p>{t("clients.detail.clientInfoCopy")}</p></div><div className="form-fields"><div className="form-grid"><label>{t("clients.detail.name")}<input name="name" required defaultValue={client.name} /></label><label>{t("clients.detail.industry")}<input name="industry" defaultValue={client.industry} /></label></div><label>{t("clients.detail.descriptionLabel")}<textarea name="description" rows={3} defaultValue={client.description} /></label><label>{t("clients.detail.generalContext")}<textarea name="general_context" rows={9} defaultValue={client.general_context} /><span className="field-help">{t("clients.detail.generalContextHelp")}</span></label><label className="switch-row"><span><strong>{t("clients.detail.activeClient")}</strong><small>{t("clients.detail.activeClientHint")}</small></span><input name="is_active" type="checkbox" defaultChecked={client.is_active} /></label></div></section><div className="form-footer split"><button type="button" className="button danger" onClick={remove}><Trash2 size={16} /> {t("clients.detail.deleteClient")}</button><button className="button primary" disabled={busy}>{busy ? <LoaderCircle className="spin" size={17} /> : <Save size={17} />} {t("clients.detail.saveChanges")}</button></div></form>}
+    {tab === "plan" && <SubscriptionSummary key={client.id} endpoint={`/clients/${client.id}/subscription`} />}
 
-    {tab === "agents" && (client.agents.length ? <div className="table-shell"><table className="data-table"><thead><tr><th>{t("clients.detail.colAgent")}</th><th>{t("clients.detail.colFunction")}</th><th>{t("clients.detail.colStatus")}</th><th /></tr></thead><tbody>{client.agents.map((agent) => <tr key={agent.id}><td><Link className="entity-cell" href={`/agents/${agent.id}`}><span className="agent-avatar"><Bot size={18} /></span><strong>{agent.name}</strong></Link></td><td>{agent.description || t("clients.detail.noDescription")}</td><td><StatusBadge active={agent.is_active} /></td><td><Link className="row-arrow" href={`/agents/${agent.id}`}><ArrowRight size={17} /></Link></td></tr>)}</tbody></table></div> : <EmptyState icon={<Bot />} title={t("clients.detail.agentsEmptyTitle")} description={t("clients.detail.agentsEmptyDescription")} action={<Link href={`/agents/new?client=${client.id}`} className="button primary">{t("clients.detail.createAgent")}</Link>} />)}
+    {tab === "details" && <><p role="status">{t(client.portal_email_verified_at ? "clients.detail.emailVerified" : "clients.detail.emailPending")}</p><section className="metrics-grid client-resource-grid">
+      <button type="button" className="metric-card client-resource-card" onClick={() => setTab("agents")}><span className="metric-icon blue"><Bot size={19} /></span><div><small>{t("clients.detail.resourcesAgents")}</small><strong>{client.agents.length}</strong><p>{t("clients.detail.resourcesAgentsCopy")}</p></div><ArrowRight size={17} /></button>
+      <Link className="metric-card client-resource-card" href={`/leads?client_id=${encodeURIComponent(client.id)}`}><span className="metric-icon green"><ContactRound size={19} /></span><div><small>{t("clients.detail.resourcesLeads")}</small><strong>{resourceCounts ? `${resourceCounts.leads}${resourceCounts.leadsCapped ? "+" : ""}` : "—"}</strong><p>{t("clients.detail.resourcesLeadsCopy")}</p></div><ArrowRight size={17} /></Link>
+      <button type="button" className="metric-card client-resource-card" onClick={() => setTab("inbox")}><span className="metric-icon violet"><MessagesSquare size={19} /></span><div><small>{t("clients.detail.resourcesConversations")}</small><strong>{resourceCounts?.conversations ?? "—"}</strong><p>{t("clients.detail.resourcesConversationsCopy")}</p></div><ArrowRight size={17} /></button>
+    </section><form className="page-form" onSubmit={saveDetails}><section className="form-section"><div className="section-copy"><h2>{t("clients.detail.clientInfo")}</h2><p>{t("clients.detail.clientInfoCopy")}</p></div><div className="form-fields"><div className="form-grid"><label>{t("clients.detail.name")}<input name="name" required defaultValue={client.name} /></label><label>{t("clients.detail.industry")}<input name="industry" defaultValue={client.industry} /></label></div><label>{t("clients.detail.descriptionLabel")}<textarea name="description" rows={3} defaultValue={client.description} /></label><label>{t("clients.detail.generalContext")}<textarea name="general_context" rows={9} defaultValue={client.general_context} /><span className="field-help">{t("clients.detail.generalContextHelp")}</span></label><label>{t("clients.detail.salesAdvisorPhone")}<input name="sales_advisor_phone" type="tel" defaultValue={client.sales_advisor_phone || ""} placeholder="+51987654321" /><span className="field-help">{t("clients.detail.salesAdvisorPhoneHelp")}</span></label><label className="switch-row"><span><strong>{t("clients.detail.activeClient")}</strong><small>{t("clients.detail.activeClientHint")}</small></span><input name="is_active" type="checkbox" defaultChecked={client.is_active} /></label></div></section><div className="form-footer split"><button type="button" className="button danger" onClick={remove}><Trash2 size={16} /> {t("clients.detail.deleteClient")}</button><button className="button primary" disabled={busy}>{busy ? <LoaderCircle className="spin" size={17} /> : <Save size={17} />} {t("clients.detail.saveChanges")}</button></div></form></>}
+
+    {tab === "agents" && (client.agents.length ? <div className="table-shell"><table className="data-table"><thead><tr><th>{t("clients.detail.colAgent")}</th><th>{t("clients.detail.colFunction")}</th><th>{t("clients.detail.colStatus")}</th><th>{t("clients.detail.colKnowledge")}</th><th /></tr></thead><tbody>{client.agents.map((agent) => <tr key={agent.id}><td><Link className="entity-cell" href={`/agents/${agent.id}`}><span className="agent-avatar"><Bot size={18} /></span><strong>{agent.name}</strong></Link></td><td>{agent.description || t("clients.detail.noDescription")}</td><td><StatusBadge active={agent.is_active} /></td><td><Link className="button secondary" href={`/agents/${agent.id}?tab=knowledge`}><BookOpen size={16} /> {t("clients.detail.openKnowledge")}</Link></td><td><Link className="row-arrow" href={`/agents/${agent.id}`}><ArrowRight size={17} /></Link></td></tr>)}</tbody></table></div> : <EmptyState icon={<Bot />} title={t("clients.detail.agentsEmptyTitle")} description={t("clients.detail.agentsEmptyDescription")} action={<Link href={`/agents/new?client=${client.id}`} className="button primary">{t("clients.detail.createAgent")}</Link>} />)}
 
     {tab === "channels" && <section className="compact-channel-grid"><article className="channel-live"><span><MessageCircle size={20} /></span><div><strong>{t("channels.whatsappCloud.title")}</strong><small>{t("clients.detail.channelWhatsappAvailable", { name: client.name })}</small></div><Link className="button secondary" href={`/clients/${client.id}/channels/whatsapp-cloud`}>{t("clients.detail.configure")}</Link></article><article className="channel-live"><span><QrCode size={20} /></span><div><strong>{t("channels.whatsapp.title")}</strong><small>{t("clients.detail.channelWhatsappQrAvailable")}</small></div><Link className="button secondary" href={`/clients/${client.id}/channels/whatsapp`}>{t("clients.detail.configure")}</Link></article><article className="channel-live"><span><Globe2 size={20} /></span><div><strong>{t("channels.webchat.title")}</strong><small>{t("clients.detail.channelWebchatAvailable")}</small></div>{client.agents.length ? <Link className="button secondary" href={`/agents/${client.agents[0].id}?tab=widget`}>{t("clients.detail.configure")}</Link> : <button disabled>{t("clients.detail.connect")}</button>}</article>{["Instagram", "Facebook Messenger"].map((name) => <article key={name}><span><MessageCircle size={20} /></span><div><strong>{name}</strong><small>{t("clients.detail.comingSoon")}</small></div><button disabled>{t("clients.detail.connect")}</button></article>)}</section>}
 

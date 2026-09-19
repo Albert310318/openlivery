@@ -35,3 +35,17 @@ export function isDirectIncoming(message: WAMessage): boolean {
     !jid.endsWith("@newsletter"),
   );
 }
+
+export function trustedPhoneJid(message: WAMessage): string | null {
+  const remoteJid = message.key.remoteJid;
+  if (!remoteJid?.endsWith("@lid")) return null;
+  const alternate = message.key.remoteJidAlt;
+  return alternate && /^[0-9]{7,15}@s\.whatsapp\.net$/.test(alternate) ? alternate : null;
+}
+
+export function directIncomingForUpsert(type: string, messages: WAMessage[]): WAMessage[] {
+  // Baileys uses append for history sync/replay. It must never trigger a new
+  // AI turn or commercial activation; only live notify events enter the API.
+  if (type !== "notify") return [];
+  return messages.filter(isDirectIncoming);
+}

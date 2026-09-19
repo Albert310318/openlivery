@@ -3,6 +3,7 @@ export type User = {
   name: string;
   email: string;
   role: string;
+  is_vendiq_admin: boolean;
   agency: Agency;
 };
 
@@ -21,9 +22,11 @@ export type Client = {
   portal_enabled: boolean;
   portal_title: string;
   portal_email: string | null;
+  portal_email_verified_at: string | null;
   portal_password_configured: boolean;
   portal_domain: string | null;
   portal_domain_verified: boolean;
+  sales_advisor_phone: string | null;
   agents: AgentSummary[];
   created_at: string;
   updated_at: string;
@@ -118,6 +121,29 @@ export type ToolCallMeta = { name: string; arguments: Record<string, unknown>; r
 
 export type Source = { id: string; filename: string; excerpt: string };
 export type Message = { id: string; role: "user" | "assistant"; content: string; sources: Source[]; tool_calls?: ToolCallMeta[] | null; sender_type: "visitor" | "ai" | "human"; sender_name: string | null; created_at: string };
+export type ConversationLead = { id: string; name: string | null; phone: string | null; email: string | null; interest: string | null; budget: string | null; preferred_contact_time: string | null; status: string };
+export type LeadStatus = "new" | "qualified" | "follow_up" | "won" | "lost";
+export type Lead = {
+  id: string;
+  agency_id: string;
+  client_id: string;
+  agent_id: string;
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+  interest: string | null;
+  budget: string | null;
+  preferred_contact_time: string | null;
+  notes: string | null;
+  source: string;
+  status: LeadStatus;
+  next_follow_up_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+export type LeadDetail = Lead & {
+  conversations: { conversation_id: string; channel: string; title: string; created_at: string }[];
+};
 
 export type ConversationInbox = {
   id: string;
@@ -146,6 +172,7 @@ export type Conversation = {
   updated_at: string;
   preview?: string;
   messages?: Message[];
+  lead: ConversationLead | null;
 };
 
 export type WhatsAppChannel = {

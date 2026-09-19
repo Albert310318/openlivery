@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, AudioLines, Bot, CheckCircle2, Code, Copy, ExternalLink, FileText, ImageIcon, LoaderCircle, MessageSquareText, Plus, Power, PowerOff, Save, Settings2, Sparkles, Trash2, UploadCloud, Wrench, XCircle } from "lucide-react";
 import { api, messageFrom } from "@/lib/api";
+import { accessibleClients } from "@/lib/clients";
 import { useT } from "@/lib/i18n";
 import { Alert } from "@/components/ui";
 import { FormSkeleton } from "@/components/skeleton";
@@ -46,7 +47,7 @@ export default function AgentDetailPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
-    const [a, c, d, q, tl] = await Promise.all([api<Agent>(`/agents/${id}`), api<Client[]>("/clients"), api<KnowledgeDocument[]>(`/agents/${id}/documents`), api<QAPair[]>(`/agents/${id}/qa`), api<AgentTool[]>(`/agents/${id}/tools`)]);
+    const [a, c, d, q, tl] = await Promise.all([api<Agent>(`/agents/${id}`), accessibleClients(), api<KnowledgeDocument[]>(`/agents/${id}/documents`), api<QAPair[]>(`/agents/${id}/qa`), api<AgentTool[]>(`/agents/${id}/tools`)]);
     setAgent(a); setClients(c); setDocuments(d); setQaPairs(q); setTools(tl);
     setProvider(a.provider); setModel(a.model); setTimezone(a.timezone || "UTC");
     setTemperature(a.temperature); setMaxTokens(a.max_tokens); setMemoryLimit(a.memory_limit);

@@ -1,5 +1,13 @@
 // UI strings for the "portal" area. Fill `en` and mirror it in `es`.
 const en = {
+  nav: { home: "Home", leads: "Leads", channels: "Channels" },
+  titles: { home: "Company overview", leads: "Leads", inbox: "Inbox", agents: "Assigned agents", channels: "Channel status" },
+  metrics: { leads: "Leads", conversations: "Conversations", activeAgents: "Active agents", connectedChannels: "Connected channels" },
+  common: { active: "Active", inactive: "Inactive", notConfigured: "Not configured" },
+  home: { noDescription: "No company description has been added." },
+  leads: { name: "Name", contact: "Contact", interest: "Interest", status: "Status", empty: "No leads yet." },
+  agents: { noDescription: "No description." },
+  channels: { empty: "No channels configured", emptyDescription: "Your agency has not configured a channel for this company yet." },
   loader: {
     loading: "Loading portal…",
     unavailable: "Portal not available",
@@ -66,6 +74,14 @@ const en = {
 };
 
 const es: typeof en = {
+  nav: { home: "Inicio", leads: "Leads", channels: "Canales" },
+  titles: { home: "Resumen de la empresa", leads: "Leads", inbox: "Inbox", agents: "Agentes asignados", channels: "Estado de canales" },
+  metrics: { leads: "Leads", conversations: "Conversaciones", activeAgents: "Agentes activos", connectedChannels: "Canales conectados" },
+  common: { active: "Activo", inactive: "Inactivo", notConfigured: "No configurado" },
+  home: { noDescription: "Todavía no se ha añadido una descripción de la empresa." },
+  leads: { name: "Nombre", contact: "Contacto", interest: "Interés", status: "Estado", empty: "Todavía no hay leads." },
+  agents: { noDescription: "Sin descripción." },
+  channels: { empty: "No hay canales configurados", emptyDescription: "Tu agencia todavía no ha configurado un canal para esta empresa." },
   loader: {
     loading: "Cargando portal…",
     unavailable: "Portal no disponible",

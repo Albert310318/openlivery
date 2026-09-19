@@ -8,7 +8,7 @@ import type { Dictionary } from "./en";
 export type Lang = "en" | "es";
 
 const dictionaries = { en, es };
-const DEFAULT_LANG: Lang = "en";
+const DEFAULT_LANG: Lang = "es";
 const STORAGE_KEY = "openlivery.lang";
 
 // All valid dotted key paths derived from the dictionary shape. A typo in a

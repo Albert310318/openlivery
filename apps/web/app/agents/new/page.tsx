@@ -7,6 +7,7 @@ import { ArrowLeft, ArrowRight, Check, LoaderCircle, PencilLine, Sparkles } from
 import { Alert } from "@/components/ui";
 import { useToast } from "@/components/toast";
 import { api, messageFrom } from "@/lib/api";
+import { accessibleClients } from "@/lib/clients";
 import { useLanguage } from "@/lib/i18n";
 import { PROVIDERS, modelsFor, modelOptionsFor, defaultModelFor, estimateTokens } from "@/lib/providers";
 import { Combobox } from "@/components/combobox";
@@ -43,7 +44,7 @@ export default function NewAgentPage() {
 
   useEffect(() => {
     const preferred = new URLSearchParams(window.location.search).get("client") || "";
-    api<Client[]>("/clients").then((c) => {
+    accessibleClients().then((c) => {
       setClients(c);
       setClientId(preferred || c[0]?.id || "");
     }).catch(() => {});

@@ -9,7 +9,7 @@ import pino from "pino";
 import QRCode from "qrcode";
 import { backend, setStatus } from "./api.js";
 import { createDatabaseAuth } from "./auth.js";
-import { incomingMedia, incomingText, isDirectIncoming } from "./messages.js";
+import { directIncomingForUpsert, incomingMedia, incomingText, isDirectIncoming, trustedPhoneJid } from "./messages.js";
 
 // Skip forwarding media larger than this; the backend also caps at 20 MB.
 const MAX_MEDIA_BYTES = 18 * 1024 * 1024;
@@ -32,6 +32,7 @@ type InboundResult = {
   accepted: boolean;
   reply?: string | null;
   outbound_message_id?: string | null;
+  delivery_id?: string | null;
 };
 
 const logger = pino({ level: process.env.WHATSAPP_LOG_LEVEL || "silent" });
@@ -44,6 +45,22 @@ function errorCode(error: unknown): number | undefined {
 function cleanNumber(jid?: string | null): string | null {
   if (!jid) return null;
   return jid.split(":")[0]?.split("@")[0] || null;
+}
+
+function activationFailureState(error: unknown): "FAILED" | "UNKNOWN" {
+  return (error as { activationState?: string } | undefined)?.activationState === "FAILED" ? "FAILED" : "UNKNOWN";
+}
+
+function messageTimestampIso(message: WAMessage): string | null {
+  const raw = message.messageTimestamp;
+  const seconds = typeof raw === "number"
+    ? raw
+    : raw && typeof raw === "object" && "toNumber" in raw && typeof raw.toNumber === "function"
+      ? raw.toNumber()
+      : Number(raw);
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  const timestamp = new Date(seconds * 1000);
+  return Number.isNaN(timestamp.getTime()) ? null : timestamp.toISOString();
 }
 
 async function processIncoming(channelId: string, socket: WASocket, message: WAMessage): Promise<void> {
@@ -60,6 +77,10 @@ async function processIncoming(channelId: string, socket: WASocket, message: WAM
     sender_name: message.pushName || null,
     text: text || "",
   };
+  const timestamp = messageTimestampIso(message);
+  if (timestamp) body.message_timestamp = timestamp;
+  const trustedSenderJid = trustedPhoneJid(message);
+  if (trustedSenderJid) body.trusted_sender_jid = trustedSenderJid;
   if (media) {
     try {
       const buffer = (await downloadMediaMessage(
@@ -78,20 +99,55 @@ async function processIncoming(channelId: string, socket: WASocket, message: WAM
     }
   }
 
-  const result = await backend<InboundResult>(`/channels/${channelId}/inbound`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-  if (!result.reply) return;
-  const sent = await socket.sendMessage(remoteJid, { text: result.reply });
-  if (result.outbound_message_id && sent?.key.id) {
-    await backend(`/channels/${channelId}/outbound-confirm`, {
+  let result: InboundResult;
+  try {
+    result = await backend<InboundResult>(`/channels/${channelId}/inbound`, {
       method: "POST",
-      body: JSON.stringify({
-        message_id: result.outbound_message_id,
-        external_message_id: sent.key.id,
-      }),
+      body: JSON.stringify(body),
     });
+    console.info(`[WhatsApp ${channelId}] API inbound handoff succeeded; accepted=${result.accepted}`);
+  } catch (error) {
+    console.error(`[WhatsApp ${channelId}] API inbound handoff failed:`, (error as Error).message);
+    throw error;
+  }
+  if (!result.reply) return;
+  try {
+    const runtime = runtimes.get(channelId);
+    if (!runtime || runtime.socket !== socket || runtime.stopRequested) {
+      const error = new Error("WhatsApp is not connected");
+      (error as Error & { activationState?: string }).activationState = "FAILED";
+      throw error;
+    }
+    const sent = await socket.sendMessage(remoteJid, { text: result.reply });
+    const acceptedAt = new Date().toISOString();
+    if (!sent?.key.id) throw new Error("WhatsApp did not confirm the send");
+    if (result.outbound_message_id) {
+      await backend(`/channels/${channelId}/outbound-confirm`, {
+        method: "POST",
+        body: JSON.stringify({
+          message_id: result.outbound_message_id,
+          delivery_id: result.delivery_id || undefined,
+          external_message_id: sent.key.id,
+          accepted_at: acceptedAt,
+        }),
+      });
+    }
+  } catch (error) {
+    if (result.delivery_id && result.outbound_message_id) {
+      // A rejected promise may still hide an accepted transport operation;
+      // classify it as UNKNOWN and never send the same reply again here.
+      await backend(`/channels/${channelId}/activation-failure`, {
+        method: "POST",
+        body: JSON.stringify({
+          message_id: result.outbound_message_id,
+          delivery_id: result.delivery_id,
+          state: activationFailureState(error),
+        }),
+      }).catch((reportError) => {
+        console.error(`[WhatsApp ${channelId}] Could not record activation outcome:`, (reportError as Error).message);
+      });
+    }
+    throw error;
   }
 }
 
@@ -121,8 +177,12 @@ export async function connectChannel(channelId: string): Promise<void> {
   });
 
   socket.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (type !== "notify") return;
-    for (const message of messages) {
+    const incoming = directIncomingForUpsert(type, messages);
+    console.info(
+      `[WhatsApp ${channelId}] messages.upsert type=${type} count=${messages.length} ` +
+      `accepted=${incoming.length} filtered=${messages.length - incoming.length}`,
+    );
+    for (const message of incoming) {
       try {
         await processIncoming(channelId, socket, message);
       } catch (error) {
@@ -140,6 +200,7 @@ export async function connectChannel(channelId: string): Promise<void> {
         await setStatus(channelId, "qr", { qr_code: qrCode });
       }
       if (connection === "open") {
+        console.info(`[WhatsApp ${channelId}] Connection open`);
         await persist();
         await setStatus(channelId, "connected", {
           phone_number: cleanNumber(socket.user?.id),
@@ -150,6 +211,7 @@ export async function connectChannel(channelId: string): Promise<void> {
         const latest = runtimes.get(channelId);
         if (latest !== runtime) return;
         const code = errorCode(lastDisconnect?.error);
+        console.warn(`[WhatsApp ${channelId}] Connection close; code=${code ?? "unknown"}`);
         const loggedOut = code === DisconnectReason.loggedOut || code === DisconnectReason.badSession;
         if (runtime.stopRequested || loggedOut) {
           runtimes.delete(channelId);
@@ -159,6 +221,7 @@ export async function connectChannel(channelId: string): Promise<void> {
         await setStatus(channelId, "reconnecting", {
           error: code ? `WhatsApp closed the connection (${code}). Retrying…` : "Connection interrupted. Retrying…",
         });
+        console.info(`[WhatsApp ${channelId}] Reconnect scheduled`);
         runtime.reconnectTimer = setTimeout(() => {
           runtimes.delete(channelId);
           void connectChannel(channelId).catch(async (error) => {

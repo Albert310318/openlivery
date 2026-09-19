@@ -1,16 +1,17 @@
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import get_current_user
-from ..models import Agent, Client, Conversation, Message, UsageRecord, User, WhatsAppChannel, now_utc
+from ..models import Agent, Client, Conversation, Lead, Message, UsageRecord, User, WhatsAppChannel, now_utc
 from ..schemas import DashboardMetrics, DashboardOut
 
 
 router = APIRouter(prefix="/dashboard", tags=["Inicio"])
+LEAD_STATUSES = ("new", "qualified", "follow_up", "won", "lost")
 
 
 @router.get("", response_model=DashboardOut)
@@ -39,6 +40,25 @@ def dashboard(db: Session = Depends(get_db), user: User = Depends(get_current_us
     recent_agents = db.scalars(
         select(Agent).where(Agent.agency_id == agency_id).order_by(Agent.created_at.desc()).limit(5)
     ).all()
+    lead_rows = db.execute(
+        select(Lead.status, func.count(Lead.id))
+        .where(Lead.agency_id == agency_id)
+        .group_by(Lead.status)
+    ).all()
+    leads_by_status = {status: 0 for status in LEAD_STATUSES}
+    leads_by_status.update({status: count for status, count in lead_rows})
+    total_leads = sum(leads_by_status.values())
+    conversion_rate = round((leads_by_status["won"] / total_leads) * 100, 1) if total_leads else 0.0
+    current_time = now_utc()
+    follow_up_rows = db.scalars(
+        select(Lead)
+        .where(Lead.agency_id == agency_id, Lead.next_follow_up_at.is_not(None))
+        .order_by(
+            case((Lead.next_follow_up_at < current_time, 0), else_=1),
+            Lead.next_follow_up_at.asc(),
+        )
+        .limit(5)
+    ).all()
     return {
         "clients": clients,
         "active_clients": active_clients,
@@ -48,6 +68,19 @@ def dashboard(db: Session = Depends(get_db), user: User = Depends(get_current_us
         "channels": channels,
         "connected_channels": connected_channels,
         "recent_agents": recent_agents,
+        "total_leads": total_leads,
+        "leads_by_status": leads_by_status,
+        "conversion_rate": conversion_rate,
+        "pending_follow_ups": [
+            {
+                "id": lead.id,
+                "name": lead.name,
+                "interest": lead.interest,
+                "next_follow_up_at": lead.next_follow_up_at,
+                "is_overdue": lead.next_follow_up_at < current_time,
+            }
+            for lead in follow_up_rows
+        ],
     }
 
 

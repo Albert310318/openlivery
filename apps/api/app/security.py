@@ -26,16 +26,18 @@ def create_access_token(user_id: str) -> str:
 def decode_access_token(token: str) -> str | None:
     try:
         payload = jwt.decode(token, get_settings().secret_key, algorithms=["HS256"])
+        if payload.get("type") is not None:
+            return None
         return payload.get("sub")
     except jwt.PyJWTError:
         return None
 
 
-def create_portal_token(client_id: str, portal_slug: str) -> str:
+def create_portal_token(client_id: str, portal_slug: str, credentials_version: int = 0) -> str:
     settings = get_settings()
     expires = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_minutes)
     return jwt.encode(
-        {"sub": client_id, "portal_slug": portal_slug, "type": "portal", "exp": expires},
+        {"sub": client_id, "portal_slug": portal_slug, "type": "portal", "credentials_version": credentials_version, "exp": expires},
         settings.secret_key,
         algorithm="HS256",
     )

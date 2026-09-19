@@ -6,27 +6,37 @@ store the visitor message, and produce the AI reply unless a human operator has
 taken over. The caller is responsible for actually delivering the reply.
 """
 
+import logging
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from ..config import trial_activation_eligible_since
 from ..models import Agent, Conversation, Message, now_utc
 from .knowledge import build_system_prompt, retrieve_knowledge
+from .leads import lead_context_from_conversation
 from .media import describe_image, transcribe_audio
 from .providers import resolve_agent_credentials, resolve_provider_credentials
+from .subscriptions import prepare_activation_delivery
 from .tools import run_completion
 from .usage import record_usage
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class InboundMessage:
     external_message_id: str
     external_chat_id: str
+    trusted_sender_jid: str | None = None
     sender_name: str | None = None
     text: str = ""
+    message_timestamp: datetime | None = None
+    is_historical: bool = False
     media_kind: str | None = None
     media_bytes: bytes | None = None
     media_mime: str | None = None
@@ -39,6 +49,38 @@ class InboundResult:
     conversation_id: uuid.UUID | None = None
     mode: str | None = None
     outbound_message_id: uuid.UUID | None = None
+    delivery_id: uuid.UUID | None = None
+
+
+LUCIA_NEW_SESSION_AFTER = timedelta(hours=12)
+LUCIA_INTRO = "Hola, soy Lucía, asesora virtual de Chiclayo Tours 😊"
+
+
+def _automation_block_reason(inbound: InboundMessage) -> str | None:
+    if inbound.is_historical:
+        return "historical_event"
+    cutoff = trial_activation_eligible_since()
+    if cutoff is None:
+        return "missing_or_invalid_cutoff"
+    if inbound.message_timestamp is None:
+        return "missing_message_timestamp"
+    if inbound.message_timestamp.tzinfo is None or inbound.message_timestamp.utcoffset() is None:
+        return "invalid_message_timestamp"
+    if inbound.message_timestamp.astimezone(cutoff.tzinfo) < cutoff:
+        return "message_before_cutoff"
+    return None
+
+
+def _starts_new_lucia_session(conversation: Conversation | None, agent: Agent, received_at: datetime) -> bool:
+    if agent.client.name != "Chiclayo Tours" or not agent.name.startswith("Lucía"):
+        return False
+    return conversation is None or received_at - conversation.updated_at >= LUCIA_NEW_SESSION_AFTER
+
+
+def _with_lucia_session_intro(text: str, should_introduce: bool) -> str:
+    if not should_introduce or "soy lucía" in text.casefold():
+        return text
+    return f"{LUCIA_INTRO}\n\n{text}"
 
 
 def _media_placeholder(kind: str) -> str:
@@ -84,6 +126,7 @@ async def process_inbound(
     *,
     conversation_channel: str,
     channel_fk_field: str,
+    activation_channel: str | None = None,
 ) -> InboundResult:
     """Run the shared pipeline for one inbound message.
 
@@ -92,6 +135,7 @@ async def process_inbound(
     select the Conversation channel label and FK column for the caller.
     """
     fk_column = getattr(Conversation, channel_fk_field)
+    received_at = now_utc()
 
     existing = db.scalar(
         select(Message)
@@ -112,6 +156,7 @@ async def process_inbound(
             Conversation.external_chat_id == inbound.external_chat_id,
         )
     )
+    new_lucia_session = _starts_new_lucia_session(conversation, channel.agent, received_at)
     if not conversation:
         title = (inbound.sender_name or inbound.external_chat_id.split("@")[0])[:240]
         conversation = Conversation(
@@ -141,6 +186,18 @@ async def process_inbound(
     conversation.updated_at = now_utc()
     db.add(visitor_message)
     db.commit()
+    blocked_reason = _automation_block_reason(inbound)
+    if blocked_reason:
+        logger.warning(
+            "Inbound automation skipped: reason=%s external_message_id=%s",
+            blocked_reason,
+            inbound.external_message_id,
+        )
+        return InboundResult(
+            accepted=True,
+            conversation_id=conversation.id,
+            mode="historical" if inbound.is_historical else "ineligible",
+        )
     if conversation.mode == "human":
         return InboundResult(accepted=True, conversation_id=conversation.id, mode="human")
 
@@ -173,6 +230,10 @@ async def process_inbound(
             base_url,
             api_key,
             messages,
+            tool_context=lead_context_from_conversation(
+                conversation,
+                trusted_sender_jid=inbound.trusted_sender_jid,
+            ),
             temperature=agent.temperature,
             max_tokens=agent.max_tokens,
         )
@@ -182,10 +243,15 @@ async def process_inbound(
         db.commit()
         return InboundResult(accepted=True, conversation_id=conversation.id, mode="ai")
 
+    db.refresh(conversation)
+    if conversation.mode == "human":
+        return InboundResult(accepted=True, conversation_id=conversation.id, mode="human")
+
+    reply_text = _with_lucia_session_intro(completion.text, new_lucia_session)
     outbound = Message(
         conversation_id=conversation.id,
         role="assistant",
-        content=completion.text,
+        content=reply_text,
         sources=knowledge.sources,
         tool_calls=completion.tool_calls,
         sender_type="ai",
@@ -195,11 +261,29 @@ async def process_inbound(
     conversation.updated_at = now_utc()
     channel.last_error = None
     db.add(outbound)
+    delivery_id = None
+    if activation_channel == "whatsapp_qr":
+        # The assistant message and its PREPARED evidence must become visible
+        # together, before the caller starts the network send.
+        db.flush()
+        delivery = prepare_activation_delivery(
+            db,
+            client_id=channel.client_id,
+            message_id=outbound.id,
+            whatsapp_channel_id=channel.id,
+            recipient=inbound.external_chat_id,
+            trusted_recipient=inbound.trusted_sender_jid,
+            source_message_timestamp=inbound.message_timestamp,
+        )
+        db.add(delivery)
+        db.flush()
+        delivery_id = delivery.id
     db.commit()
     return InboundResult(
         accepted=True,
-        reply=completion.text,
+        reply=reply_text,
         conversation_id=conversation.id,
         mode="ai",
         outbound_message_id=outbound.id,
+        delivery_id=delivery_id,
     )

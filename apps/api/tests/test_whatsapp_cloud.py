@@ -22,6 +22,11 @@ def _sign(raw: bytes, secret: str = APP_SECRET) -> str:
 
 
 def _webhook_payload(messages: list[dict], contacts: list[dict] | None = None) -> dict:
+    messages = [
+        {"timestamp": "1790000000", **message}
+        if "timestamp" not in message else message
+        for message in messages
+    ]
     return {
         "object": "whatsapp_business_account",
         "entry": [

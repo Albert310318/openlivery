@@ -8,8 +8,12 @@ them through the plain-completion text extractors until the loop ends.
 
 import json
 
+from sqlalchemy.orm import Session
+
 from ..ai import ANTHROPIC_VERSION, Completion, _post_json, extract_openai_text
+from ..leads import LeadContext
 from .http_exec import execute_http_tool
+from .internal import enforce_lead_confirmation, execute_internal_tool
 from .mcp_client import call_mcp_tool
 from .specs import ToolSpec, find_spec
 
@@ -17,8 +21,17 @@ MAX_TOOL_ITERATIONS = 5
 RESULT_PREVIEW_CHARS = 500
 
 
-async def _execute(spec: ToolSpec, args: dict) -> tuple[str, bool]:
-    if spec.mcp_tool_name is not None:
+async def _execute(
+    spec: ToolSpec,
+    args: dict,
+    db: Session | None = None,
+    tool_context: LeadContext | None = None,
+) -> tuple[str, bool]:
+    if spec.internal_name is not None:
+        if db is None or tool_context is None:
+            return "Error: internal tool context is unavailable", True
+        result, is_error = await execute_internal_tool(db, spec.internal_name, args, tool_context)
+    elif spec.mcp_tool_name is not None:
         result, is_error = await call_mcp_tool(spec.tool, spec.mcp_tool_name, args)
     else:
         result, is_error = await execute_http_tool(spec.tool, args)
@@ -37,6 +50,7 @@ def _record(metadata: list[dict], name: str, args: dict, result: str, is_error: 
 async def anthropic_tool_loop(
     base_url: str, api_key: str, model: str, messages: list[dict], specs: list[ToolSpec],
     temperature: float | None, max_tokens: int | None,
+    db: Session | None = None, tool_context: LeadContext | None = None,
 ) -> Completion:
     url = f"{base_url.rstrip('/')}/messages"
     headers = {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION, "Content-Type": "application/json"}
@@ -65,7 +79,9 @@ async def anthropic_tool_loop(
             text = "".join(block.get("text", "") for block in content if block.get("type") == "text").strip()
             if not text:
                 raise ValueError("empty response")
-            return Completion(text, input_tokens, output_tokens, tool_calls=metadata or None)
+            return Completion(
+                enforce_lead_confirmation(text, metadata), input_tokens, output_tokens, tool_calls=metadata or None
+            )
         convo.append({"role": "assistant", "content": content})
         results = []
         for block in tool_uses:
@@ -74,7 +90,7 @@ async def anthropic_tool_loop(
             if spec is None:
                 result, is_error = f"Error: unknown tool '{block.get('name')}'", True
             else:
-                result, is_error = await _execute(spec, args)
+                result, is_error = await _execute(spec, args, db, tool_context)
             _record(metadata, block.get("name", ""), args, result, is_error)
             results.append({"type": "tool_result", "tool_use_id": block.get("id"), "content": result, "is_error": is_error})
         convo.append({"role": "user", "content": results})
@@ -84,6 +100,7 @@ async def anthropic_tool_loop(
 async def openai_tool_loop(
     base_url: str, api_key: str, model: str, messages: list[dict], specs: list[ToolSpec],
     temperature: float | None, max_tokens: int | None,
+    db: Session | None = None, tool_context: LeadContext | None = None,
 ) -> Completion:
     url = f"{base_url.rstrip('/')}/responses"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -112,7 +129,8 @@ async def openai_tool_loop(
         output = data.get("output", [])
         calls = [item for item in output if item.get("type") == "function_call"]
         if not calls:
-            return Completion(extract_openai_text(data), input_tokens, output_tokens, tool_calls=metadata or None)
+            text = enforce_lead_confirmation(extract_openai_text(data), metadata)
+            return Completion(text, input_tokens, output_tokens, tool_calls=metadata or None)
         # The API requires the function_call items echoed back in the input.
         input_items.extend(output)
         for call in calls:
@@ -124,7 +142,7 @@ async def openai_tool_loop(
             if spec is None:
                 result, is_error = f"Error: unknown tool '{call.get('name')}'", True
             else:
-                result, is_error = await _execute(spec, args)
+                result, is_error = await _execute(spec, args, db, tool_context)
             _record(metadata, call.get("name", ""), args, result, is_error)
             input_items.append({"type": "function_call_output", "call_id": call.get("call_id"), "output": result})
     raise ValueError("tool loop did not converge")

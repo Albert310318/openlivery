@@ -1,9 +1,13 @@
+import uuid
+import pytest
 import asyncio
 import base64
 from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
+from app.models import Conversation, Client, now_utc
 from app.routers import agents as agents_router
 from app.routers import clients as clients_router
 from app.routers import providers as providers_router
@@ -12,6 +16,10 @@ from app.routers import widget as widget_router
 from app.config import get_settings
 from app.services import ai as ai_service
 from app.services import whatsapp_inbound as whatsapp_inbound_service
+from conftest import TestingSession
+
+
+TEST_MESSAGE_TIMESTAMP = "2026-09-12T12:00:00+00:00"
 
 
 def _fake_http(monkeypatch, captured, response_json):
@@ -550,6 +558,9 @@ def test_white_label_portal_and_human_takeover(authenticated_client: TestClient)
     assert configured.status_code == 200
     assert configured.json()["portal_password_configured"] is True
     assert "portal_password_hash" not in configured.json()
+    with TestingSession() as db:
+        db.get(Client, uuid.UUID(client_id)).portal_email_verified_at = now_utc()
+        db.commit()
 
     agent = client.post(
         "/api/agents",
@@ -617,6 +628,7 @@ def test_whatsapp_inbound_image_uses_capability(authenticated_client: TestClient
         json={
             "external_message_id": "wa-img-1",
             "remote_jid": "573001112233@s.whatsapp.net",
+            "message_timestamp": TEST_MESSAGE_TIMESTAMP,
             "sender_name": "Ana",
             "media_kind": "image",
             "media_base64": base64.b64encode(b"fake-image-bytes").decode(),
@@ -678,6 +690,7 @@ def test_whatsapp_channel_inbound_ai_takeover_and_session(authenticated_client: 
         json={
             "external_message_id": "wa-in-1",
             "remote_jid": "573001112233@s.whatsapp.net",
+            "message_timestamp": TEST_MESSAGE_TIMESTAMP,
             "sender_name": "Maria",
             "text": "What days are you open?",
         },
@@ -693,7 +706,7 @@ def test_whatsapp_channel_inbound_ai_takeover_and_session(authenticated_client: 
     duplicate = client.post(
         f"/api/internal/whatsapp/channels/{channel_id}/inbound",
         headers=headers,
-        json={"external_message_id": "wa-in-1", "remote_jid": "573001112233@s.whatsapp.net", "sender_name": "Maria", "text": "What days are you open?"},
+        json={"external_message_id": "wa-in-1", "remote_jid": "573001112233@s.whatsapp.net", "sender_name": "Maria", "text": "What days are you open?", "message_timestamp": TEST_MESSAGE_TIMESTAMP},
     )
     assert duplicate.json()["accepted"] is False
     assert fake_completion.await_count == 1
@@ -702,7 +715,7 @@ def test_whatsapp_channel_inbound_ai_takeover_and_session(authenticated_client: 
     human_inbound = client.post(
         f"/api/internal/whatsapp/channels/{channel_id}/inbound",
         headers=headers,
-        json={"external_message_id": "wa-in-2", "remote_jid": "573001112233@s.whatsapp.net", "sender_name": "Maria", "text": "I need to speak with someone."},
+        json={"external_message_id": "wa-in-2", "remote_jid": "573001112233@s.whatsapp.net", "sender_name": "Maria", "text": "I need to speak with someone.", "message_timestamp": TEST_MESSAGE_TIMESTAMP},
     )
     assert human_inbound.json()["reply"] is None
     assert human_inbound.json()["mode"] == "human"
@@ -717,3 +730,67 @@ def test_whatsapp_channel_inbound_ai_takeover_and_session(authenticated_client: 
     assert reply.json()["messages"][-1]["external_message_id"] == "wa-out-human-1"
     sender.assert_awaited_once()
     assert client.patch(f"/api/conversations/{conversation_id}/mode", json={"mode": "ai"}).json()["mode"] == "ai"
+
+
+def test_inflight_ai_response_and_tool_continue_after_human_takeover(authenticated_client: TestClient, monkeypatch):
+    client = authenticated_client
+    customer = client.post(
+        "/api/clients",
+        json={"name": "Concurrency Test", "industry": "Testing", "description": "", "general_context": "", "is_active": True},
+    ).json()
+    client.put("/api/providers/openai", json={"api_key": "secret"})
+    agent = client.post(
+        "/api/agents",
+        json={
+            "client_id": customer["id"],
+            "provider": "openai",
+            "model": "gpt-5",
+            "name": "Test Agent",
+            "description": "",
+            "instructions": "Capture the lead.",
+            "personality": "Professional",
+            "is_active": True,
+        },
+    ).json()
+    channel_id = client.put(
+        f"/api/whatsapp/channels/{customer['id']}", json={"agent_id": agent["id"]}
+    ).json()["id"]
+    headers = {"X-Bridge-Token": get_settings().whatsapp_bridge_token}
+
+    async def finish_after_takeover(*_args, **_kwargs):
+        with TestingSession() as other_db:
+            conversation = other_db.scalar(
+                select(Conversation).where(Conversation.external_chat_id == "51955111222@s.whatsapp.net")
+            )
+            assert conversation is not None
+            assert conversation.mode == "ai"
+            conversation.mode = "human"
+            other_db.commit()
+        return ai_service.Completion(text="Respuesta IA tardía")
+
+    monkeypatch.setattr(whatsapp_inbound_service, "run_completion", finish_after_takeover)
+    inbound = client.post(
+        f"/api/internal/whatsapp/channels/{channel_id}/inbound",
+        headers=headers,
+        json={
+            "external_message_id": "concurrency-in-1",
+            "remote_jid": "51955111222@s.whatsapp.net",
+            "message_timestamp": TEST_MESSAGE_TIMESTAMP,
+            "sender_name": "Rosa",
+            "text": "Mi nombre es Rosa Concurrente",
+        },
+    )
+
+    assert inbound.status_code == 200, inbound.text
+    assert inbound.json()["mode"] == "human"
+    assert inbound.json()["reply"] is None
+    assert inbound.json()["outbound_message_id"] is None
+    detail = client.get(f"/api/conversations/{inbound.json()['conversation_id']}").json()
+    assert detail["mode"] == "human"
+    assert [message["sender_type"] for message in detail["messages"]] == ["visitor"]
+    assert all(message["tool_calls"] is None for message in detail["messages"])
+
+
+@pytest.fixture(autouse=True)
+def mock_portal_email_transport(monkeypatch):
+    monkeypatch.setattr("app.services.portal_verification.send_verification_email", lambda *args: None)

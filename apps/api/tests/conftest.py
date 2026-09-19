@@ -10,6 +10,7 @@ os.environ["DATABASE_URL"] = os.getenv(
     "postgresql+psycopg://openlivery:openlivery@localhost:5432/openlivery_test",
 )
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
+os.environ.setdefault("TRIAL_ACTIVATION_ELIGIBLE_SINCE", "2026-01-01T00:00:00+00:00")
 
 from app.database import Base, get_db  # noqa: E402
 from app.main import app  # noqa: E402

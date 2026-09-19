@@ -1,3 +1,4 @@
+import { subscriptions } from "./dicts/subscriptions";
 // English dictionary (source of truth), composed from per-area modules under
 // ./dicts. `es.ts` mirrors this exact shape. Access with dotted paths, e.g.
 // t("nav.clients"), t("clients.list.title").
@@ -11,6 +12,7 @@ import { playground } from "./dicts/playground";
 import { portal } from "./dicts/portal";
 import { inbox } from "./dicts/inbox";
 import { tools } from "./dicts/tools";
+import { leads } from "./dicts/leads";
 
 export const en = {
   ...core.en,
@@ -23,6 +25,8 @@ export const en = {
   portal: portal.en,
   inbox: inbox.en,
   tools: tools.en,
+  leads: leads.en,
+  subscriptions: subscriptions.en,
 };
 
 export type Dictionary = typeof en;

@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
@@ -31,6 +32,13 @@ def _channel(db: Session, channel_id: uuid.UUID) -> WhatsAppCloudChannel:
     if not channel:
         raise HTTPException(status_code=404, detail="Unknown channel")
     return channel
+
+
+def _message_timestamp(value: object) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(int(str(value)), tz=timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 @public_router.get("/channels/{channel_id}/webhook")
@@ -59,6 +67,7 @@ def _parse_message(message: dict, contacts: dict[str, str]) -> InboundMessage | 
         "external_message_id": message.get("id") or "",
         "external_chat_id": sender,
         "sender_name": contacts.get(sender),
+        "message_timestamp": _message_timestamp(message.get("timestamp")),
     }
     if not base["external_message_id"] or not sender:
         return None

@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import AliasPath, BaseModel, ConfigDict, EmailStr, Field
 
 
 class ORMModel(BaseModel):
@@ -10,6 +11,8 @@ class ORMModel(BaseModel):
 
 class RegisterRequest(BaseModel):
     agency_name: str = Field(min_length=2, max_length=180)
+    industry: str = Field(default="", max_length=160)
+    whatsapp: str | None = Field(default=None, max_length=80)
     name: str = Field(min_length=2, max_length=160)
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
@@ -18,6 +21,30 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+
+class UnifiedLoginOut(BaseModel):
+    principal_type: Literal["admin", "portal"]
+    redirect_to: str
+
+
+class PortalVerificationPending(BaseModel):
+    status: Literal["verification_required"] = "verification_required"
+    masked_email: str
+    retry_after: int
+
+
+class PortalVerificationConfirm(BaseModel):
+    code: str = Field(pattern=r"^[0-9]{6}$")
+
+
+class PasswordRecoveryRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordRecoveryReset(BaseModel):
+    new_password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
 
 
 class AgencyOut(ORMModel):
@@ -39,6 +66,7 @@ class UserOut(ORMModel):
     name: str
     email: EmailStr
     role: str
+    is_vendiq_admin: bool
     agency: AgencyOut
 
 
@@ -60,6 +88,7 @@ class ClientUpdate(BaseModel):
     description: str | None = None
     general_context: str | None = None
     is_active: bool | None = None
+    sales_advisor_phone: str | None = Field(default=None, max_length=80)
 
 
 class ClientPortalUpdate(BaseModel):
@@ -88,9 +117,11 @@ class ClientOut(ORMModel):
     portal_enabled: bool
     portal_title: str
     portal_email: EmailStr | None
+    portal_email_verified_at: datetime | None
     portal_password_configured: bool
     portal_domain: str | None
     portal_domain_verified: bool
+    sales_advisor_phone: str | None
     created_at: datetime
     updated_at: datetime
     agents: list[AgentSummary] = []
@@ -300,8 +331,20 @@ class MessageOut(ORMModel):
     created_at: datetime
 
 
+class ConversationLeadOut(ORMModel):
+    id: uuid.UUID
+    name: str | None
+    phone: str | None
+    email: str | None
+    interest: str | None
+    budget: str | None
+    preferred_contact_time: str | None
+    status: str
+
+
 class ConversationDetail(ConversationOut):
     messages: list[MessageOut] = []
+    lead: ConversationLeadOut | None = Field(default=None, validation_alias=AliasPath("lead_link", "lead"))
 
 
 class ConversationInboxOut(BaseModel):
@@ -348,6 +391,35 @@ class PortalSessionOut(BaseModel):
     agency_name: str
 
 
+class PortalSummaryOut(BaseModel):
+    client_name: str
+    industry: str
+    description: str
+    is_active: bool
+    agents: int
+    active_agents: int
+    conversations: int
+    leads: int
+    channels: int
+    connected_channels: int
+
+
+class PortalChannelOut(BaseModel):
+    type: str
+    status: str
+    display_name: str | None
+    phone_number: str | None
+    is_enabled: bool
+
+
+class DashboardFollowUp(BaseModel):
+    id: uuid.UUID
+    name: str | None
+    interest: str | None
+    next_follow_up_at: datetime
+    is_overdue: bool
+
+
 class DashboardOut(BaseModel):
     clients: int
     active_clients: int
@@ -357,6 +429,10 @@ class DashboardOut(BaseModel):
     channels: int
     connected_channels: int
     recent_agents: list[AgentSummary]
+    total_leads: int
+    leads_by_status: dict[str, int]
+    conversion_rate: float
+    pending_follow_ups: list[DashboardFollowUp]
 
 
 class DailyPoint(BaseModel):
@@ -447,6 +523,9 @@ class WidgetReply(BaseModel):
 class WhatsAppInbound(BaseModel):
     external_message_id: str = Field(min_length=1, max_length=255)
     remote_jid: str = Field(min_length=1, max_length=255)
+    trusted_sender_jid: str | None = Field(default=None, max_length=255)
+    message_timestamp: datetime | None = None
+    is_historical: bool = False
     sender_name: str | None = Field(default=None, max_length=180)
     text: str = Field(default="", max_length=50000)
     # Optional media (base64) for voice notes / images, processed by the agent's
@@ -462,8 +541,17 @@ class WhatsAppInboundResult(BaseModel):
     conversation_id: uuid.UUID | None = None
     mode: str | None = None
     outbound_message_id: uuid.UUID | None = None
+    delivery_id: uuid.UUID | None = None
 
 
 class WhatsAppOutboundConfirm(BaseModel):
     message_id: uuid.UUID
     external_message_id: str = Field(min_length=1, max_length=255)
+    delivery_id: uuid.UUID | None = None
+    accepted_at: datetime | None = None
+
+
+class WhatsAppActivationFailure(BaseModel):
+    delivery_id: uuid.UUID
+    message_id: uuid.UUID
+    state: str = Field(pattern=r"^(FAILED|UNKNOWN)$")

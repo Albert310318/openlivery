@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useEffect, useState } from "react";
-import { Bot, Building2, CreditCard, Inbox, LayoutDashboard, LogOut, Menu, MessageSquareText, Radio, Settings, Sparkles, Wallet, X } from "lucide-react";
+import { Bot, Building2, ContactRound, CreditCard, Inbox, LayoutDashboard, LogOut, Menu, MessageSquareText, Radio, Settings, Sparkles, Wallet, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { useT, type I18nKey } from "@/lib/i18n";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { DiscordIcon } from "@/components/discord-icon";
+import { BrandLogo } from "@/components/brand";
 import { DISCORD_INVITE_URL } from "@/lib/community";
+import { currentClient } from "@/lib/clients";
 import type { User } from "@/types";
 
 const navigation: { href: string; labelKey: I18nKey; icon: typeof LayoutDashboard }[] = [
@@ -16,6 +18,7 @@ const navigation: { href: string; labelKey: I18nKey; icon: typeof LayoutDashboar
   { href: "/clients", labelKey: "nav.clients", icon: Building2 },
   { href: "/agents", labelKey: "nav.agents", icon: Bot },
   { href: "/inbox", labelKey: "nav.inbox", icon: Inbox },
+  { href: "/leads", labelKey: "nav.leads", icon: ContactRound },
   { href: "/playground", labelKey: "nav.playground", icon: MessageSquareText },
   { href: "/channels", labelKey: "nav.channels", icon: Radio },
   { href: "/settings", labelKey: "nav.settings", icon: Settings },
@@ -54,13 +57,18 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(pathname !== "/login");
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [routeRedirecting, setRouteRedirecting] = useState(false);
   const isLogin = pathname === "/login";
+  const isRegistration = pathname === "/registro";
+  const isPasswordRecovery = pathname === "/recuperar-contrasena";
+  const isHome = pathname === "/";
+  const isClientManagementRoute = ["/clients", "/clients/", "/clients/new", "/clients/new/"].includes(pathname);
   const isPortal = pathname.startsWith("/portal/");
   const isWidget = pathname.startsWith("/widget/");
   const isExtraPublic = EXTRA_PUBLIC_PATHS.some(
     (path) => pathname === path || pathname.startsWith(`${path}/`),
   );
-  const isBare = isLogin || isPortal || isWidget || isExtraPublic;
+  const isBare = isLogin || isRegistration || isPasswordRecovery || isPortal || isWidget || isExtraPublic;
 
   // Check the session on entry and revalidate it on every navigation, without
   // taking the shell off screen to do it: `loading` starts true and is only ever
@@ -69,14 +77,27 @@ export function AppShell({ children }: { children: ReactNode }) {
   // the check runs in the background. Losing the session clears the user, which
   // puts the loader back up until the redirect lands.
   useEffect(() => {
-    if (isBare) { setLoading(false); setUser(null); return; }
+    if (isBare) { setLoading(false); setUser(null); setRouteRedirecting(false); return; }
     let cancelled = false;
+    setRouteRedirecting(false);
     api<User>("/auth/me")
-      .then((current) => { if (!cancelled) setUser(current); })
-      .catch(() => { if (!cancelled) { setUser(null); router.replace("/login"); } })
+      .then(async (current) => {
+        if (isClientManagementRoute && !current.is_vendiq_admin) {
+          setRouteRedirecting(true);
+          try {
+            const own = await currentClient();
+            if (!cancelled) router.replace(`/clients/${own.id}`);
+          } catch {
+            if (!cancelled) router.replace("/onboarding");
+          }
+          return;
+        }
+        if (!cancelled) setUser(current);
+      })
+      .catch(() => { if (!cancelled) { setUser(null); if (!isHome) router.replace("/login"); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [isBare, pathname, router]);
+  }, [isBare, isClientManagementRoute, isHome, pathname, router]);
 
   async function logout() {
     await api("/auth/logout", { method: "POST" });
@@ -88,7 +109,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   if (isBare) return <>{children}</>;
-  if (loading || !user) return <div className="app-loader"><span className="openlivery-icon"><img src="/brand/openlivery-logo-original.png" alt="" /></span><span>{t("shell.loading")}</span></div>;
+  if (loading) return <div className="app-loader"><BrandLogo variant="compact" /><span>{t("shell.loading")}</span></div>;
+  if (routeRedirecting) return <div className="app-loader"><BrandLogo variant="compact" /><span>{t("shell.loading")}</span></div>;
+  if (!user) {
+    if (isHome) return <>{children}</>;
+    return <div className="app-loader"><BrandLogo variant="compact" /><span>{t("shell.loading")}</span></div>;
+  }
+
+  const sidebarNavigation = user.is_vendiq_admin ? navigation : navigation.filter((item) => item.href !== "/clients");
 
   return (
     <div className="app-layout">
@@ -96,13 +124,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       {mobileOpen && <div className="sidebar-overlay" onClick={() => setMobileOpen(false)} />}
       <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
         <div className="brand-row">
-          <Link href="/" className="brand"><span className="openlivery-icon"><img src="/brand/openlivery-logo-original.png" alt="" /></span><span>OpenLivery</span></Link>
+          <Link href="/" className="brand" aria-label="Atiende y Vende, inicio"><BrandLogo variant="compact" /><span>AYV</span></Link>
           <button className="sidebar-close" onClick={() => setMobileOpen(false)} aria-label={t("shell.closeMenu")}><X /></button>
         </div>
         <div className="sidebar-workspace"><Building2 size={14} /><span>{user.agency.name}</span></div>
         <nav>
           <span className="nav-label">{t("nav.section")}</span>
-          {navigation.map((item) => {
+          {sidebarNavigation.map((item) => {
             const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
             return <Link key={item.href} href={item.href} className={active ? "active" : ""} onClick={() => setMobileOpen(false)}><item.icon size={18} /><span>{t(item.labelKey)}</span></Link>;
           })}

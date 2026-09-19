@@ -20,7 +20,8 @@ class ToolSpec:
     name: str            # name exposed to the LLM (prefixed for MCP tools)
     description: str
     input_schema: dict
-    tool: AgentTool      # backing row
+    tool: AgentTool | None = None  # backing row for HTTP/MCP tools
+    internal_name: str | None = None
     mcp_tool_name: str | None = None  # unprefixed name on the MCP server
 
 
@@ -57,7 +58,7 @@ def build_tool_specs(tools: list[AgentTool]) -> list[ToolSpec]:
             description = tool.description or tool.name
             if tool.prompt_instructions:
                 description = f"{description}\n\nWhen to use: {tool.prompt_instructions}"
-            specs.append(ToolSpec(tool.name, description, _http_input_schema(tool), tool))
+            specs.append(ToolSpec(tool.name, description, _http_input_schema(tool), tool=tool))
             continue
         for entry in tool.cached_tools or []:
             mcp_name = entry.get("name") or ""

@@ -12,8 +12,11 @@ from .routers import (
     conversations,
     dashboard,
     domains,
+    leads,
     portal,
     providers,
+    subscriptions,
+    promotions,
     whatsapp,
     whatsapp_cloud,
     whatsapp_cloud_webhook,
@@ -52,6 +55,7 @@ app.include_router(agent_tools.router, prefix="/api")
 app.include_router(providers.router, prefix="/api")
 app.include_router(catalog.router, prefix="/api")
 app.include_router(conversations.router, prefix="/api")
+app.include_router(leads.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(portal.router, prefix="/api")
 app.include_router(whatsapp.router, prefix="/api")
@@ -60,3 +64,7 @@ app.include_router(whatsapp_cloud.router, prefix="/api")
 app.include_router(whatsapp_cloud_webhook.public_router, prefix="/api")
 app.include_router(widget.router, prefix="/api")
 app.include_router(domains.public_router, prefix="/api")
+
+app.include_router(subscriptions.router, prefix="/api")
+
+app.include_router(promotions.router, prefix="/api")

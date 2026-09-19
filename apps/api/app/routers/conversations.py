@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..database import get_db
 from ..deps import get_current_user
-from ..models import Agent, Conversation, Message, User, now_utc
+from ..models import Agent, Conversation, LeadConversation, Message, User, now_utc
 from ..schemas import (
     ConversationCreate,
     ConversationDetail,
@@ -17,6 +17,7 @@ from ..schemas import (
 )
 from ..services.tools import run_completion
 from ..services.knowledge import build_system_prompt, retrieve_knowledge
+from ..services.leads import lead_context_from_conversation
 from ..services.media import describe_image, transcribe_audio
 from ..services.providers import resolve_agent_credentials, resolve_provider_credentials
 from ..services.usage import record_usage
@@ -34,6 +35,7 @@ def _conversation(db: Session, user: User, conversation_id: uuid.UUID) -> Conver
         .options(
             selectinload(Conversation.messages),
             joinedload(Conversation.agent).joinedload(Agent.client),
+            joinedload(Conversation.lead_link).joinedload(LeadConversation.lead),
         )
         .execution_options(populate_existing=True)
         .where(Conversation.id == conversation_id, Conversation.agency_id == user.agency_id)
@@ -195,7 +197,14 @@ async def _generate_reply(
     messages = [{"role": "system", "content": build_system_prompt(agent, knowledge.text)}, *history]
     base_url, api_key = credentials
     completion = await run_completion(
-        db, agent, base_url, api_key, messages, temperature=agent.temperature, max_tokens=agent.max_tokens
+        db,
+        agent,
+        base_url,
+        api_key,
+        messages,
+        tool_context=lead_context_from_conversation(conversation),
+        temperature=agent.temperature,
+        max_tokens=agent.max_tokens,
     )
     db.add(
         Message(

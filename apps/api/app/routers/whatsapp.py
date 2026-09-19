@@ -16,6 +16,7 @@ from ..models import Agent, Client, Conversation, Message, User, WhatsAppChannel
 from ..schemas import (
     WhatsAppChannelOut,
     WhatsAppChannelUpdate,
+    WhatsAppActivationFailure,
     WhatsAppInbound,
     WhatsAppInboundResult,
     WhatsAppInternalAuth,
@@ -23,6 +24,12 @@ from ..schemas import (
     WhatsAppOutboundConfirm,
 )
 from ..security import decrypt_secret, encrypt_secret
+from ..services.subscriptions import (
+    TrialActivationError,
+    confirm_activation_delivery,
+    ensure_trial_started,
+    resolve_activation_transport_failure,
+)
 from ..services.whatsapp import bridge_command
 from ..services.whatsapp_inbound import InboundMessage, process_inbound
 
@@ -229,6 +236,9 @@ async def inbound_message(channel_id: uuid.UUID, payload: WhatsAppInbound, db: S
         InboundMessage(
             external_message_id=payload.external_message_id,
             external_chat_id=payload.remote_jid,
+            trusted_sender_jid=payload.trusted_sender_jid,
+            message_timestamp=payload.message_timestamp,
+            is_historical=payload.is_historical,
             sender_name=payload.sender_name,
             text=payload.text,
             media_kind=payload.media_kind,
@@ -237,12 +247,29 @@ async def inbound_message(channel_id: uuid.UUID, payload: WhatsAppInbound, db: S
         ),
         conversation_channel="whatsapp",
         channel_fk_field="whatsapp_channel_id",
+        activation_channel="whatsapp_qr",
     )
     return asdict(result)
 
 
 @internal_router.post("/channels/{channel_id}/outbound-confirm", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(_require_bridge)])
 def confirm_outbound(channel_id: uuid.UUID, payload: WhatsAppOutboundConfirm, db: Session = Depends(get_db)):
+    if payload.delivery_id is not None:
+        if payload.accepted_at is None:
+            raise HTTPException(status_code=409, detail="Activation callback requires accepted_at")
+        try:
+            confirm_activation_delivery(
+                db,
+                delivery_id=payload.delivery_id,
+                message_id=payload.message_id,
+                whatsapp_channel_id=channel_id,
+                external_message_id=payload.external_message_id,
+                accepted_at=payload.accepted_at,
+            )
+            ensure_trial_started(db, payload.delivery_id)
+        except TrialActivationError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return
     message = db.scalar(
         select(Message)
         .join(Conversation)
@@ -252,3 +279,17 @@ def confirm_outbound(channel_id: uuid.UUID, payload: WhatsAppOutboundConfirm, db
         raise HTTPException(status_code=404, detail="Message not found")
     message.external_message_id = payload.external_message_id
     db.commit()
+
+
+@internal_router.post("/channels/{channel_id}/activation-failure", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(_require_bridge)])
+def activation_failure(channel_id: uuid.UUID, payload: WhatsAppActivationFailure, db: Session = Depends(get_db)):
+    try:
+        resolve_activation_transport_failure(
+            db,
+            delivery_id=payload.delivery_id,
+            message_id=payload.message_id,
+            whatsapp_channel_id=channel_id,
+            state=payload.state,
+        )
+    except TrialActivationError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

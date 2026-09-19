@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowRight, Facebook, Globe2, Instagram, Lock, MessageCircle, QrCode, type LucideIcon } from "lucide-react";
 import { PageHead } from "@/components/ui";
-import { api } from "@/lib/api";
+import { accessibleClients } from "@/lib/clients";
 import { useT } from "@/lib/i18n";
 import type { Client } from "@/types";
 
@@ -17,7 +17,7 @@ export default function ChannelsPage() {
   const t = useT();
   const [clients, setClients] = useState<Client[]>([]);
   const [clientId, setClientId] = useState("");
-  useEffect(() => { api<Client[]>("/clients").then(setClients); }, []);
+  useEffect(() => { accessibleClients().then(setClients); }, []);
   const selected = clients.find((item) => item.id === clientId);
   return <div className="page"><PageHead eyebrow={t("channels.head.eyebrow")} title={t("channels.head.title")} description={t("channels.head.description")} />
     <div className="channels-toolbar"><label htmlFor="channel-client">{t("channels.toolbar.clientLabel")}</label><select id="channel-client" value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">{t("channels.toolbar.allClients")}</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select>{selected && <Link href={`/clients/${selected.id}`} className="button secondary">{t("channels.toolbar.openClient")}</Link>}</div>

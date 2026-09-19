@@ -1,7 +1,8 @@
 import uuid
-from datetime import datetime, timezone
+from decimal import Decimal
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import event, inspect, select, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer, JSON, LargeBinary, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -51,6 +52,14 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(30), default="admin")
+    is_vendiq_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    password_recovery_code_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    password_recovery_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    password_recovery_last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    password_recovery_send_window_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    password_recovery_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    password_recovery_send_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    password_recovery_credentials_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
     agency: Mapped[Agency] = relationship(back_populates="users")
@@ -71,15 +80,26 @@ class Client(Base):
     portal_title: Mapped[str] = mapped_column(String(180), default="")
     portal_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     portal_password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    portal_email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    portal_verification_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    portal_verification_last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    portal_verification_send_window_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    portal_verification_code_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    portal_verification_attempts: Mapped[int] = mapped_column(default=0, server_default="0")
+    portal_verification_send_count: Mapped[int] = mapped_column(default=0, server_default="0")
+    portal_credentials_version: Mapped[int] = mapped_column(default=0, server_default="0")
     # Optional custom domain for this client's portal. Verified via a DNS TXT
     # challenge; only verified domains are routed and get an on-demand cert.
     portal_domain: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     portal_domain_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     portal_domain_token: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    sales_advisor_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
     agents: Mapped[list["Agent"]] = relationship(back_populates="client", cascade="all, delete-orphan")
+    leads: Mapped[list["Lead"]] = relationship(back_populates="client", cascade="all, delete-orphan")
+    lead_handoffs: Mapped[list["LeadHandoff"]] = relationship(back_populates="client", cascade="all, delete-orphan")
     whatsapp_channel: Mapped["WhatsAppChannel | None"] = relationship(
         back_populates="client", cascade="all, delete-orphan", uselist=False
     )
@@ -162,6 +182,7 @@ class Agent(Base):
     whatsapp_channels: Mapped[list["WhatsAppChannel"]] = relationship(back_populates="agent")
     whatsapp_cloud_channels: Mapped[list["WhatsAppCloudChannel"]] = relationship(back_populates="agent")
     tools: Mapped[list["AgentTool"]] = relationship(back_populates="agent", cascade="all, delete-orphan", order_by="AgentTool.created_at")
+    leads: Mapped[list["Lead"]] = relationship(back_populates="agent")
 
 
 class AgentTool(Base):
@@ -345,6 +366,9 @@ class Conversation(Base):
     whatsapp_channel: Mapped[WhatsAppChannel | None] = relationship(back_populates="conversations")
     whatsapp_cloud_channel: Mapped[WhatsAppCloudChannel | None] = relationship(back_populates="conversations")
     messages: Mapped[list["Message"]] = relationship(back_populates="conversation", cascade="all, delete-orphan", order_by="Message.created_at")
+    lead_link: Mapped["LeadConversation | None"] = relationship(
+        back_populates="conversation", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class Message(Base):
@@ -366,3 +390,183 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
+
+
+class Lead(Base):
+    __tablename__ = "leads"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('new', 'qualified', 'follow_up', 'won', 'lost')",
+            name="ck_leads_status",
+        ),
+        UniqueConstraint("agency_id", "client_id", "phone_normalized", name="uq_leads_tenant_phone"),
+        UniqueConstraint("agency_id", "client_id", "email_normalized", name="uq_leads_tenant_email"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agents.id", ondelete="RESTRICT"), index=True)
+    name: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    phone_normalized: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    email_normalized: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    interest: Mapped[str | None] = mapped_column(Text, nullable=True)
+    budget: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    preferred_contact_time: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(String(40), default="playground", server_default="playground")
+    status: Mapped[str] = mapped_column(String(30), default="new", server_default="new", index=True)
+    next_follow_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+    client: Mapped[Client] = relationship(back_populates="leads")
+    agent: Mapped[Agent] = relationship(back_populates="leads")
+    conversations: Mapped[list["LeadConversation"]] = relationship(
+        back_populates="lead", cascade="all, delete-orphan"
+    )
+    handoffs: Mapped[list["LeadHandoff"]] = relationship(back_populates="lead", cascade="all, delete-orphan")
+
+
+class LeadConversation(Base):
+    __tablename__ = "lead_conversations"
+    __table_args__ = (UniqueConstraint("conversation_id", name="uq_lead_conversations_conversation"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    lead_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("leads.id", ondelete="CASCADE"), index=True)
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+    lead: Mapped[Lead] = relationship(back_populates="conversations")
+    conversation: Mapped[Conversation] = relationship(back_populates="lead_link")
+
+
+class LeadHandoff(Base):
+    __tablename__ = "lead_handoffs"
+    __table_args__ = (
+        CheckConstraint("status IN ('sending', 'sent', 'failed')", name="ck_lead_handoffs_status"),
+        UniqueConstraint("consent_message_id", name="uq_lead_handoffs_consent_message"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    lead_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("leads.id", ondelete="CASCADE"), index=True)
+    conversation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+    consent_message_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), index=True)
+    advisor_phone: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(20), default="sending", server_default="sending")
+    external_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    client: Mapped[Client] = relationship(back_populates="lead_handoffs")
+    lead: Mapped[Lead] = relationship(back_populates="handoffs")
+
+
+class Plan(Base):
+    """VENDIQ subscription offering; no business/customer payment data."""
+    __tablename__ = "plans"
+    __table_args__ = (
+        CheckConstraint("monthly_price IS NULL OR monthly_price >= 0", name="ck_plans_monthly_price"),
+        CheckConstraint("length(currency) = 3 AND currency = upper(currency)", name="ck_plans_currency"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    code: Mapped[str] = mapped_column(String(64), unique=True)
+    name: Mapped[str] = mapped_column(String(180))
+    description: Mapped[str] = mapped_column(Text, default="", server_default="")
+    monthly_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    currency: Mapped[str] = mapped_column(String(3))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    available_for_new_subscriptions: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
+    modules: Mapped[list["Module"]] = relationship(secondary="plan_modules", order_by="Module.code")
+
+
+class Module(Base):
+    __tablename__ = "modules"
+
+    code: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(180))
+    # Catalog inclusion does not imply that a feature has been implemented.
+    is_available: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
+
+class PlanModule(Base):
+    __tablename__ = "plan_modules"
+
+    plan_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("plans.id", ondelete="CASCADE"), primary_key=True)
+    module_code: Mapped[str] = mapped_column(ForeignKey("modules.code", ondelete="RESTRICT"), primary_key=True)
+
+
+class ClientSubscription(Base):
+    __tablename__ = "client_subscriptions"
+    __table_args__ = (
+        UniqueConstraint("client_id", name="uq_client_subscriptions_client_id"),
+        CheckConstraint(
+            "status IN ('TRIAL', 'ACTIVE', 'PAYMENT_PENDING', 'SUSPENDED', 'CANCELLED')",
+            name="ck_client_subscriptions_status",
+        ),
+        CheckConstraint(
+            "(first_activated_at IS NULL AND trial_started_at IS NULL AND trial_ends_at IS NULL) OR "
+            "(first_activated_at IS NOT NULL AND trial_started_at IS NOT NULL AND trial_ends_at IS NOT NULL "
+            "AND trial_started_at = first_activated_at AND trial_ends_at > trial_started_at)",
+            name="ck_client_subscriptions_trial_dates",
+        ),
+        CheckConstraint(
+            "trial_ends_at IS NULL OR trial_ends_at = trial_started_at + interval '72 hours'",
+            name="ck_client_subscriptions_trial_72h",
+        ).ddl_if(dialect="postgresql"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"))
+    plan_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("plans.id", ondelete="RESTRICT"), index=True)
+    status: Mapped[str] = mapped_column(String(20))
+    first_activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    trial_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    trial_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_renewal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+    client: Mapped[Client] = relationship()
+    plan: Mapped[Plan] = relationship()
+
+
+@event.listens_for(ClientSubscription, "before_insert")
+@event.listens_for(ClientSubscription, "before_update")
+def _validate_subscription_dates(mapper, connection, subscription: ClientSubscription) -> None:
+    """Integrity validation, not an activation hook. PostgreSQL also guards writes."""
+    dates = (subscription.first_activated_at, subscription.trial_started_at, subscription.trial_ends_at)
+    if any(value is not None for value in dates):
+        if any(value is None for value in dates):
+            raise ValueError("Activation and trial dates must be set together")
+        # SQLite fixtures reload datetimes without timezone; production uses timestamptz.
+        normalized = tuple(value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value for value in dates)
+        if normalized[0] != normalized[1] or normalized[2] - normalized[0] != timedelta(hours=72):
+            raise ValueError("Trial must last exactly 72 hours from first activation")
+    if inspect(subscription).persistent:
+        previous = connection.execute(select(ClientSubscription.first_activated_at).where(
+            ClientSubscription.id == subscription.id,
+        )).scalar_one()
+        if previous is not None:
+            current = subscription.first_activated_at
+            previous = previous.replace(tzinfo=timezone.utc) if previous.tzinfo is None else previous
+            if current is not None and current.tzinfo is None:
+                current = current.replace(tzinfo=timezone.utc)
+            if current != previous:
+                raise ValueError("first_activated_at is immutable")
+
+
+# Register isolated subscription economics metadata.
+from . import models_promotions  # noqa: E402, F401
+
+# Register transport evidence metadata only; no activation hooks.
+from . import models_subscription_activation  # noqa: E402, F401
