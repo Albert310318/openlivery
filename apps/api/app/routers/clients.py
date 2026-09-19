@@ -30,15 +30,13 @@ def _domain_out(client: Client) -> ClientDomainOut:
 
 
 def _client(db: Session, user: User, client_id: uuid.UUID) -> Client:
+    query = select(Client).options(selectinload(Client.agents)).where(Client.id == client_id)
     if not user.is_vendiq_admin:
         current = _current_client(db, user)
         if not current or current.id != client_id:
             raise HTTPException(status_code=404, detail="Client not found")
-    client = db.scalar(
-        select(Client)
-        .options(selectinload(Client.agents))
-        .where(Client.id == client_id, Client.agency_id == user.agency_id)
-    )
+        query = query.where(Client.agency_id == user.agency_id)
+    client = db.scalar(query)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     return client
@@ -77,7 +75,6 @@ def list_clients(db: Session = Depends(get_db), user: User = Depends(get_current
     return db.scalars(
         select(Client)
         .options(selectinload(Client.agents))
-        .where(Client.agency_id == user.agency_id)
         .order_by(Client.created_at.desc())
     ).all()
 
