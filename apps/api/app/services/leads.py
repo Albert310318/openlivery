@@ -136,6 +136,56 @@ def trusted_whatsapp_phone(db: Session, context: LeadContext) -> str | None:
         return None
 
 
+def ensure_whatsapp_contact_lead(db: Session, context: LeadContext) -> Lead | None:
+    """Create or reuse a lead for a trusted WhatsApp contact and link the conversation."""
+    _validated_conversation(db, context)
+    trusted_phone = trusted_whatsapp_phone(db, context)
+    if not trusted_phone:
+        return None
+
+    linked = db.scalar(
+        select(Lead)
+        .join(LeadConversation)
+        .where(
+            LeadConversation.conversation_id == context.conversation_id,
+            Lead.agency_id == context.agency_id,
+            Lead.client_id == context.client_id,
+        )
+    )
+    if linked:
+        return linked
+
+    lead = db.scalar(
+        select(Lead).where(
+            Lead.agency_id == context.agency_id,
+            Lead.client_id == context.client_id,
+            Lead.phone_normalized == trusted_phone,
+        )
+    )
+    if lead is None:
+        lead = Lead(
+            agency_id=context.agency_id,
+            client_id=context.client_id,
+            agent_id=context.agent_id,
+            source=context.channel,
+            phone=trusted_phone,
+            phone_normalized=trusted_phone,
+        )
+        db.add(lead)
+        db.flush()
+
+    link = db.scalar(
+        select(LeadConversation).where(LeadConversation.conversation_id == context.conversation_id)
+    )
+    if link is None:
+        db.add(LeadConversation(lead_id=lead.id, conversation_id=context.conversation_id))
+        db.flush()
+    elif link.lead_id != lead.id:
+        raise LeadIdentityConflict("The conversation is already associated with another lead")
+
+    return lead
+
+
 def create_or_update_lead(
     db: Session,
     context: LeadContext,
