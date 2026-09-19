@@ -30,7 +30,7 @@ MAX_MEDIA_BYTES = 20 * 1024 * 1024
 
 
 def _conversation(db: Session, user: User, conversation_id: uuid.UUID) -> Conversation:
-    conversation = db.scalar(
+    query = (
         select(Conversation)
         .options(
             selectinload(Conversation.messages),
@@ -38,8 +38,11 @@ def _conversation(db: Session, user: User, conversation_id: uuid.UUID) -> Conver
             joinedload(Conversation.lead_link).joinedload(LeadConversation.lead),
         )
         .execution_options(populate_existing=True)
-        .where(Conversation.id == conversation_id, Conversation.agency_id == user.agency_id)
+        .where(Conversation.id == conversation_id)
     )
+    if not user.is_vendiq_admin:
+        query = query.where(Conversation.agency_id == user.agency_id)
+    conversation = db.scalar(query)
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation
@@ -52,7 +55,9 @@ def list_conversations(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    query = select(Conversation).where(Conversation.agency_id == user.agency_id)
+    query = select(Conversation)
+    if not user.is_vendiq_admin:
+        query = query.where(Conversation.agency_id == user.agency_id)
     if agent_id:
         query = query.where(Conversation.agent_id == agent_id)
     if client_id:
@@ -98,8 +103,9 @@ def inbox(
         .join(Agent, Agent.id == Conversation.agent_id)
         .outerjoin(last, last.c.cid == Conversation.id)
         .outerjoin(unread_counts, unread_counts.c.cid == Conversation.id)
-        .where(Conversation.agency_id == user.agency_id)
     )
+    if not user.is_vendiq_admin:
+        query = query.where(Conversation.agency_id == user.agency_id)
     if agent_id:
         query = query.where(Conversation.agent_id == agent_id)
     if channel:
@@ -139,11 +145,14 @@ def inbox(
 
 @router.post("", response_model=ConversationDetail, status_code=status.HTTP_201_CREATED)
 def create_conversation(payload: ConversationCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    agent = db.scalar(select(Agent).where(Agent.id == payload.agent_id, Agent.agency_id == user.agency_id))
+    agent_query = select(Agent).where(Agent.id == payload.agent_id)
+    if not user.is_vendiq_admin:
+        agent_query = agent_query.where(Agent.agency_id == user.agency_id)
+    agent = db.scalar(agent_query)
     if not agent:
         raise HTTPException(status_code=400, detail="The selected agent does not exist")
     conversation = Conversation(
-        agency_id=user.agency_id,
+        agency_id=agent.agency_id,
         client_id=agent.client_id,
         agent_id=agent.id,
     )
