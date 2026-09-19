@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BadgeCheck, FlaskConical, Globe, Inbox as InboxIcon, LoaderCircle, MessageCircle, Search, UserRound } from "lucide-react";
 import { PageHead } from "@/components/ui";
 import { ListRowsSkeleton } from "@/components/skeleton";
@@ -8,7 +8,7 @@ import { useToast } from "@/components/toast";
 import { api, messageFrom } from "@/lib/api";
 import { formatWhen, isNearBottom, isSameOpenThread } from "@/lib/datetime";
 import { useLanguage, useT } from "@/lib/i18n";
-import type { Agent, Conversation, ConversationInbox } from "@/types";
+import type { Agent, Client, Conversation, ConversationInbox } from "@/types";
 
 const LIMIT = 30;
 const POLL_MS = 8000;
@@ -18,8 +18,10 @@ export default function InboxPage() {
   const { lang } = useLanguage();
   const toast = useToast();
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
   const [items, setItems] = useState<ConversationInbox[]>([]);
   const [selected, setSelected] = useState<Conversation | null>(null);
+  const [clientId, setClientId] = useState("");
   const [agentId, setAgentId] = useState("");
   const [channel, setChannel] = useState("");
   const [tab, setTab] = useState<"all" | "unread" | "human" | "ai">("all");
@@ -31,7 +33,19 @@ export default function InboxPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => { api<Agent[]>("/agents").then(setAgents).catch(() => {}); }, []);
+  useEffect(() => {
+    Promise.all([api<Agent[]>("/agents"), api<Client[]>("/clients")])
+      .then(([agentRows, clientRows]) => {
+        setAgents(agentRows);
+        setClients(clientRows);
+      })
+      .catch(() => {});
+  }, []);
+
+  const clientNames = useMemo(
+    () => new Map(clients.map((client) => [client.id, client.name])),
+    [clients],
+  );
   useEffect(() => { const id = setTimeout(() => setSearch(searchInput), 300); return () => clearTimeout(id); }, [searchInput]);
 
   const channelLabel = (value: string) => {
@@ -52,6 +66,7 @@ export default function InboxPage() {
 
   const buildParams = useCallback((offsetValue: number) => {
     const params = new URLSearchParams();
+    if (clientId) params.set("client_id", clientId);
     if (agentId) params.set("agent_id", agentId);
     if (channel) params.set("channel", channel);
     if (tab === "human" || tab === "ai") params.set("mode", tab);
@@ -60,7 +75,7 @@ export default function InboxPage() {
     params.set("limit", String(LIMIT));
     params.set("offset", String(offsetValue));
     return params.toString();
-  }, [agentId, channel, tab, search]);
+  }, [clientId, agentId, channel, tab, search]);
 
   const selectedIdRef = useRef<string | null>(null);
   const deepLinkHandledRef = useRef(false);
@@ -181,7 +196,8 @@ export default function InboxPage() {
     <PageHead eyebrow={t("inbox.eyebrow")} title={t("inbox.title")} description={t("inbox.description")} />
 
     <div className="toolbar filters">
-      <div className="filter-select"><span>{t("inbox.filterAgent")}</span><select value={agentId} onChange={(e) => setAgentId(e.target.value)}><option value="">{t("inbox.allAgents")}</option>{agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
+      <div className="filter-select"><span>{t("inbox.filterClient")}</span><select value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">{t("inbox.allClients")}</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></div>
+      <div className="filter-select"><span>{t("inbox.filterAgent")}</span><select value={agentId} onChange={(e) => setAgentId(e.target.value)}><option value="">{t("inbox.allAgents")}</option>{agents.filter((a) => !clientId || a.client_id === clientId).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
       <div className="filter-select"><span>{t("inbox.filterChannel")}</span><select value={channel} onChange={(e) => setChannel(e.target.value)}><option value="">{t("inbox.allChannels")}</option><option value="playground">{t("inbox.channelPlayground")}</option><option value="whatsapp">{t("inbox.channelWhatsapp")}</option><option value="whatsapp_cloud">{t("inbox.channelWhatsappCloud")}</option><option value="widget">{t("inbox.channelWidget")}</option></select></div>
     </div>
 
@@ -205,7 +221,7 @@ export default function InboxPage() {
                 <span className="inbox-row-body">
                   <span className="inbox-row-top"><strong>{item.contact_name || item.title}</strong><time>{formatWhen(item.updated_at, lang)}</time></span>
                   <small className="inbox-row-preview">{item.preview || t("inbox.noMessages")}</small>
-                  <small className="inbox-row-meta">{item.agent_name} · {channelLabel(item.channel)} <span className={`mini-badge ${item.mode}`}>{item.mode === "human" ? t("inbox.modeHuman") : t("inbox.modeAi")}</span></small>
+                  <small className="inbox-row-meta">{clientNames.get(item.client_id) || t("inbox.unknownClient")} · {item.agent_name} · {channelLabel(item.channel)} <span className={`mini-badge ${item.mode}`}>{item.mode === "human" ? t("inbox.modeHuman") : t("inbox.modeAi")}</span></small>
                 </span>
                 {item.unread_count > 0 && selected?.id !== item.id && <span className="inbox-unread-count" aria-label={t("inbox.unreadCount", { count: item.unread_count })}>{item.unread_count > 99 ? "99+" : item.unread_count}</span>}
               </button>
@@ -218,7 +234,7 @@ export default function InboxPage() {
         {!selected ? <div className="empty-state"><div className="empty-icon"><InboxIcon /></div><h3>{t("inbox.empty")}</h3><p>{t("inbox.selectPrompt")}</p></div>
           : <>
             <header>
-              <div><strong>{selected.contact_name || selected.lead?.name || selected.title}</strong><small>{channelLabel(selected.channel)}</small></div>
+              <div><strong>{selected.contact_name || selected.lead?.name || selected.title}</strong><small>{clientNames.get(selected.client_id) || t("inbox.unknownClient")} · {channelLabel(selected.channel)}</small></div>
               <button className={`mode-toggle ${selected.mode}`} onClick={() => toggleMode(selected.mode === "ai" ? "human" : "ai")}>{selected.mode === "ai" ? t("inbox.takeControl") : t("inbox.returnToAi")}</button>
             </header>
             {selected.lead && <dl className="inbox-lead-summary">
