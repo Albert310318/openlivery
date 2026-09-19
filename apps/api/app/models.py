@@ -419,6 +419,9 @@ class Lead(Base):
     source: Mapped[str] = mapped_column(String(40), default="playground", server_default="playground")
     status: Mapped[str] = mapped_column(String(30), default="new", server_default="new", index=True)
     next_follow_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    advisor_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    advisor_notification_external_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    advisor_notification_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
