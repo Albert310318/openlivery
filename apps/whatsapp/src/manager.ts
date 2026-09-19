@@ -9,7 +9,7 @@ import pino from "pino";
 import QRCode from "qrcode";
 import { backend, setStatus } from "./api.js";
 import { createDatabaseAuth } from "./auth.js";
-import { directIncomingForUpsert, incomingMedia, incomingText, isDirectIncoming, trustedPhoneJid } from "./messages.js";
+import { directIncomingForUpsert, incomingMedia, incomingText, isDirectIncoming, normalizePhoneJid, trustedPhoneJid } from "./messages.js";
 
 // Skip forwarding media larger than this; the backend also caps at 20 MB.
 const MAX_MEDIA_BYTES = 18 * 1024 * 1024;
@@ -51,6 +51,33 @@ function activationFailureState(error: unknown): "FAILED" | "UNKNOWN" {
   return (error as { activationState?: string } | undefined)?.activationState === "FAILED" ? "FAILED" : "UNKNOWN";
 }
 
+async function resolveTrustedSenderJid(socket: WASocket, message: WAMessage): Promise<string | null> {
+  const alternate = trustedPhoneJid(message);
+  if (alternate) return alternate;
+
+  const remoteJid = message.key.remoteJid;
+  if (!remoteJid?.endsWith("@lid")) return null;
+
+  try {
+    const repository = (socket as WASocket & {
+      signalRepository?: {
+        lidMapping?: {
+          getPNForLID?: (jid: string) => Promise<string | undefined | null>;
+        };
+      };
+    }).signalRepository;
+    const mapped = await repository?.lidMapping?.getPNForLID?.(remoteJid);
+    const normalized = normalizePhoneJid(mapped);
+    console.info(
+      `[WhatsApp] LID phone resolution ${normalized ? "succeeded" : "unavailable"} for live message`,
+    );
+    return normalized;
+  } catch (error) {
+    console.warn("[WhatsApp] LID phone resolution failed:", (error as Error).message);
+    return null;
+  }
+}
+
 function messageTimestampIso(message: WAMessage): string | null {
   const raw = message.messageTimestamp;
   const seconds = typeof raw === "number"
@@ -79,7 +106,7 @@ async function processIncoming(channelId: string, socket: WASocket, message: WAM
   };
   const timestamp = messageTimestampIso(message);
   if (timestamp) body.message_timestamp = timestamp;
-  const trustedSenderJid = trustedPhoneJid(message);
+  const trustedSenderJid = await resolveTrustedSenderJid(socket, message);
   if (trustedSenderJid) body.trusted_sender_jid = trustedSenderJid;
   if (media) {
     try {
