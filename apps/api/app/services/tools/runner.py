@@ -7,7 +7,7 @@ plus tool_calls metadata when tools ran.
 
 import httpx
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ...models import Agent, AgentTool, Lead, LeadConversation, Message
