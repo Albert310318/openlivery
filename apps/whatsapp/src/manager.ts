@@ -188,7 +188,9 @@ export async function connectChannel(channelId: string): Promise<void> {
       } catch (error) {
         const detail = `Could not process an incoming message: ${(error as Error).message}`;
         console.error(`[WhatsApp ${channelId}] ${detail}`);
-        await setStatus(channelId, "error", { error: detail.slice(0, 500) }).catch(() => undefined);
+        // A processing/API failure does not mean the WhatsApp socket disconnected.
+        // Keep the transport status intact; connection.update is the authority for
+        // connected/reconnecting/error state.
       }
     }
   });
