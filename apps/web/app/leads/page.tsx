@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowRight, ContactRound, LoaderCircle, Save, Search, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { EmptyState, PageHead } from "@/components/ui";
@@ -9,7 +9,7 @@ import { useToast } from "@/components/toast";
 import { api, messageFrom } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { getOriginatingConversationId } from "@/lib/leads";
-import type { Lead, LeadStatus } from "@/types";
+import type { Client, Lead, LeadStatus } from "@/types";
 
 const LIMIT = 30;
 const STATUSES: LeadStatus[] = ["new", "qualified", "follow_up", "won", "lost"];
@@ -34,6 +34,7 @@ export default function LeadsPage() {
   const toast = useToast();
   const router = useRouter();
   const [items, setItems] = useState<Lead[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
   const [clientId, setClientId] = useState<string | null>(null);
   const [queryReady, setQueryReady] = useState(false);
   const [searchInput, setSearchInput] = useState("");
@@ -51,6 +52,17 @@ export default function LeadsPage() {
     setClientId(new URLSearchParams(window.location.search).get("client_id"));
     setQueryReady(true);
   }, []);
+
+  useEffect(() => {
+    api<Client[]>("/clients")
+      .then(setClients)
+      .catch((error) => toast.error(messageFrom(error)));
+  }, [toast]);
+
+  const clientNames = useMemo(
+    () => new Map(clients.map((client) => [client.id, client.name])),
+    [clients],
+  );
 
   useEffect(() => {
     const timer = setTimeout(() => setSearch(searchInput.trim()), 300);
@@ -157,11 +169,13 @@ export default function LeadsPage() {
     <PageHead eyebrow={t("leads.eyebrow")} title={t("leads.title")} description={t("leads.description")} />
     <div className="toolbar leads-toolbar">
       <label className="search-box"><Search size={18} /><input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder={t("leads.searchPlaceholder")} /></label>
+      <div className="filter-select"><span>{t("leads.client")}</span><select value={clientId ?? ""} onChange={(event) => setClientId(event.target.value || null)}><option value="">{t("leads.allClients")}</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></div>
       <div className="filter-select"><span>{t("leads.status")}</span><select value={status} onChange={(event) => setStatus(event.target.value as LeadStatus | "")}><option value="">{t("leads.allStatuses")}</option>{STATUSES.map((value) => <option key={value} value={value}>{t(`leads.statuses.${value}`)}</option>)}</select></div>
     </div>
-    {loading ? <TableSkeleton columns={8} /> : items.length ? <>
-      <div className="table-shell leads-table-shell"><table className="data-table leads-table"><thead><tr><th>{t("leads.name")}</th><th>{t("leads.phone")}</th><th>{t("leads.interest")}</th><th>{t("leads.budget")}</th><th>{t("leads.preferredContactTime")}</th><th>{t("leads.nextFollowUp")}</th><th>{t("leads.status")}</th><th>{t("leads.conversation")}</th></tr></thead><tbody>{items.map((lead) => { const followUp = followUpState(lead.next_follow_up_at); return <tr key={lead.id}>
+    {loading ? <TableSkeleton columns={9} /> : items.length ? <>
+      <div className="table-shell leads-table-shell"><table className="data-table leads-table"><thead><tr><th>{t("leads.name")}</th><th>{t("leads.client")}</th><th>{t("leads.phone")}</th><th>{t("leads.interest")}</th><th>{t("leads.budget")}</th><th>{t("leads.preferredContactTime")}</th><th>{t("leads.nextFollowUp")}</th><th>{t("leads.status")}</th><th>{t("leads.conversation")}</th></tr></thead><tbody>{items.map((lead) => { const followUp = followUpState(lead.next_follow_up_at); return <tr key={lead.id}>
         <td data-label={t("leads.name")}><span className="entity-cell"><span className="entity-avatar"><ContactRound size={17} /></span><strong>{lead.name || t("leads.unnamed")}</strong></span></td>
+        <td data-label={t("leads.client")}><strong>{clientNames.get(lead.client_id) || "—"}</strong></td>
         <td data-label={t("leads.phone")}>{lead.phone || "—"}</td>
         <td data-label={t("leads.interest")} className="lead-interest">{lead.interest || "—"}</td>
         <td data-label={t("leads.budget")}>{lead.budget || "—"}</td>
