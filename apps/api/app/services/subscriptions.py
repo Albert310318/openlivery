@@ -582,7 +582,9 @@ def subscription_for_client(db: Session, client_id: uuid.UUID) -> ClientSubscrip
 
 
 def admin_client(db: Session, user: User, client_id: uuid.UUID, *, lock: bool = False) -> Client:
-    query = select(Client).where(Client.id == client_id, Client.agency_id == user.agency_id)
+    query = select(Client).where(Client.id == client_id)
+    if not user.is_vendiq_admin:
+        query = query.where(Client.agency_id == user.agency_id)
     if lock:
         query = query.with_for_update()
     client = db.scalar(query)
