@@ -39,12 +39,10 @@ internal_router = APIRouter(prefix="/internal/whatsapp", tags=["WhatsApp interna
 
 
 def _channel_for_user(db: Session, user: User, client_id: uuid.UUID) -> WhatsAppChannel:
-    channel = db.scalar(
-        select(WhatsAppChannel).where(
-            WhatsAppChannel.client_id == client_id,
-            WhatsAppChannel.agency_id == user.agency_id,
-        )
-    )
+    query = select(WhatsAppChannel).where(WhatsAppChannel.client_id == client_id)
+    if not user.is_vendiq_admin:
+        query = query.where(WhatsAppChannel.agency_id == user.agency_id)
+    channel = db.scalar(query)
     if not channel:
         raise HTTPException(status_code=404, detail="This client does not have WhatsApp configured yet")
     return channel
@@ -98,16 +96,16 @@ def configure_channel(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    client = db.scalar(select(Client).where(Client.id == client_id, Client.agency_id == user.agency_id))
+    client_query = select(Client).where(Client.id == client_id)
+    if not user.is_vendiq_admin:
+        client_query = client_query.where(Client.agency_id == user.agency_id)
+    client = db.scalar(client_query)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
-    agent = db.scalar(
-        select(Agent).where(
-            Agent.id == payload.agent_id,
-            Agent.client_id == client.id,
-            Agent.agency_id == user.agency_id,
-        )
-    )
+    agent_query = select(Agent).where(Agent.id == payload.agent_id, Agent.client_id == client.id)
+    if not user.is_vendiq_admin:
+        agent_query = agent_query.where(Agent.agency_id == user.agency_id)
+    agent = db.scalar(agent_query)
     if not agent:
         raise HTTPException(status_code=400, detail="Select an agent that belongs to this client")
     channel = db.scalar(select(WhatsAppChannel).where(WhatsAppChannel.client_id == client.id))
@@ -115,7 +113,7 @@ def configure_channel(
         channel.agent_id = agent.id
         channel.is_enabled = True
     else:
-        channel = WhatsAppChannel(agency_id=user.agency_id, client_id=client.id, agent_id=agent.id)
+        channel = WhatsAppChannel(agency_id=client.agency_id, client_id=client.id, agent_id=agent.id)
         db.add(channel)
     db.commit()
     db.refresh(channel)
