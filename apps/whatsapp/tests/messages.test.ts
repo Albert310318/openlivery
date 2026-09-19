@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WAMessage } from "@whiskeysockets/baileys";
-import { directIncomingForUpsert, incomingText, isDirectIncoming, trustedPhoneJid } from "../src/messages.js";
+import { directIncomingForUpsert, incomingText, isDirectIncoming, normalizePhoneJid, trustedPhoneJid } from "../src/messages.js";
 
 function message(overrides: Partial<WAMessage> = {}): WAMessage {
   return {
@@ -43,6 +43,13 @@ test("preserves the external message ID across duplicate deliveries for API dedu
   const replay = directIncomingForUpsert("append", [item]);
   assert.equal(first[0]?.key.id, "stable-external-id");
   assert.deepEqual(replay, []);
+});
+
+test("normalizes phone JIDs returned by the LID mapping repository", () => {
+  assert.equal(normalizePhoneJid("573001234567@s.whatsapp.net"), "573001234567@s.whatsapp.net");
+  assert.equal(normalizePhoneJid("573001234567:12@s.whatsapp.net"), "573001234567@s.whatsapp.net");
+  assert.equal(normalizePhoneJid("opaque@lid"), null);
+  assert.equal(normalizePhoneJid("group@g.us"), null);
 });
 
 test("uses a valid phone alternate only for linked-identity direct messages", () => {
