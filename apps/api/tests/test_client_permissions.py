@@ -45,6 +45,12 @@ def test_global_admin_can_see_and_create_clients(client):
         email="admin@ayv.pe",
         is_vendiq_admin=True,
     )
+    foreign_id = seed_account(
+        agency_name="Garante",
+        agency_slug="garante-global-admin-test",
+        email="owner-global-admin-test@garante.pe",
+        is_vendiq_admin=False,
+    )
     login(client, "admin@ayv.pe")
 
     me = client.get("/api/auth/me")
@@ -53,12 +59,17 @@ def test_global_admin_can_see_and_create_clients(client):
 
     listed = client.get("/api/clients")
     assert listed.status_code == 200
-    assert [row["name"] for row in listed.json()] == ["AYV Administración"]
+    assert {row["name"] for row in listed.json()} == {"AYV Administración", "Garante"}
+    assert client.get(f"/api/clients/{foreign_id}").status_code == 200
 
-    created = client.post("/api/clients", json={"name": "Garante"})
+    created = client.post("/api/clients", json={"name": "Cliente administrado"})
     assert created.status_code == 201
-    assert created.json()["name"] == "Garante"
-    assert {row["name"] for row in client.get("/api/clients").json()} == {"AYV Administración", "Garante"}
+    assert created.json()["name"] == "Cliente administrado"
+    assert {row["name"] for row in client.get("/api/clients").json()} == {
+        "AYV Administración",
+        "Garante",
+        "Cliente administrado",
+    }
 
 
 def test_pyme_is_limited_to_current_company_and_cannot_create_clients(client):
