@@ -11,7 +11,7 @@ import { useToast } from "@/components/toast";
 import { PageHead, StatusBadge } from "@/components/ui";
 import { ListRowsSkeleton, PanelSkeleton, Skeleton } from "@/components/skeleton";
 import { BrandLogo } from "@/components/brand";
-import type { Agent, AgentSummary, Lead, LeadStatus } from "@/types";
+import type { Agent, AgentSummary, Lead, LeadStatus, User } from "@/types";
 import { PublicLanding } from "@/components/public-landing";
 
 type PendingFollowUp = { id: string; name: string | null; interest: string | null; next_follow_up_at: string; is_overdue: boolean };
@@ -36,11 +36,18 @@ export default function HomePage() {
   const [loadedMetrics, setLoadedMetrics] = useState(false);
   const [authResolved, setAuthResolved] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   useEffect(() => {
-    api("/auth/me")
-      .then(() => setAuthenticated(true))
-      .catch(() => setAuthenticated(false))
+    api<User>("/auth/me")
+      .then((user) => {
+        setCurrentUser(user);
+        setAuthenticated(true);
+      })
+      .catch(() => {
+        setCurrentUser(null);
+        setAuthenticated(false);
+      })
       .finally(() => setAuthResolved(true));
   }, []);
 
@@ -72,10 +79,10 @@ export default function HomePage() {
   return (
     <div className="page">
       <PageHead eyebrow={t("home.head.eyebrow")} title={t("home.head.title")} description={t("home.head.description")} action={<label className="range-select"><select value={range} onChange={(e) => setRange(Number(e.target.value))}>{[7, 14, 30, 90].map((n) => <option key={n} value={n}>{t("home.range.days", { count: n })}</option>)}</select></label>} />
-      <section className="panel next-steps home-next-steps">
+      {!currentUser?.is_vendiq_admin && <section className="panel next-steps home-next-steps">
         <div className="panel-head"><div><h3>{t("home.nextSteps.title")}</h3><p>{t("home.nextSteps.subtitle")}</p></div></div>
         <ol><li className={loadedCore && data?.clients ? "done" : ""}>{loadedCore ? <span>{data?.clients ? "✓" : "1"}</span> : <span><Skeleton style={{ width: 18, height: 18, borderRadius: 999 }} /></span>}<div><strong>{t("home.nextSteps.step1Title")}</strong><small>{t("home.nextSteps.step1Desc")}</small></div></li><li className={loadedCore && data?.agents ? "done" : ""}>{loadedCore ? <span>{data?.agents ? "✓" : "2"}</span> : <span><Skeleton style={{ width: 18, height: 18, borderRadius: 999 }} /></span>}<div><strong>{t("home.nextSteps.step2Title")}</strong><small>{t("home.nextSteps.step2Desc")}</small></div></li><li><span>3</span><div><strong>{t("home.nextSteps.step3Title")}</strong><small>{t("home.nextSteps.step3Desc")}</small></div></li></ol>
-      </section>
+      </section>}
       <section className="metrics-grid commercial-metrics-grid">
         <article className="metric-card"><span className="metric-icon blue"><ContactRound size={20} /></span><div><small>{t("home.commercial.total")}</small><strong>{loadedCore ? data?.total_leads ?? 0 : <Skeleton className="sk-line" style={{ width: 52, height: 28 }} />}</strong><p>{t("home.commercial.totalCaption")}</p></div></article>
         <article className="metric-card"><span className="metric-icon violet"><UserPlus size={20} /></span><div><small>{t("home.commercial.new")}</small><strong>{loadedCore ? data?.leads_by_status.new ?? 0 : <Skeleton className="sk-line" style={{ width: 52, height: 28 }} />}</strong><p>{t("leads.statuses.new")}</p></div></article>
