@@ -9,6 +9,7 @@ from ...models import Lead, LeadConversation, Message
 from ...schemas_leads import LeadCaptureInput, LeadToolInput
 from ..leads import LeadCaptureError, LeadContext, LeadIdentityRequired, create_or_update_lead
 from ..lead_handoffs import LeadHandoffError, notify_sales_advisor
+from ..calendar import CalendarError, availability, cancel_appointment, create_appointment, reschedule_appointment
 
 
 LEAD_CAPTURE_RULES = (
@@ -90,6 +91,93 @@ SALES_ADVISOR_TOOL_SCHEMA = {
     "required": ["consent_evidence"],
     "additionalProperties": False,
 }
+
+CALENDAR_AVAILABILITY_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "date": {"type": "string", "description": "Local date in YYYY-MM-DD."},
+        "part_of_day": {
+            "type": "string",
+            "enum": ["morning", "afternoon", "evening"],
+            "description": "Optional part of day requested by the prospect.",
+        },
+    },
+    "required": ["date"],
+    "additionalProperties": False,
+}
+
+CALENDAR_CREATE_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "start_iso": {
+            "type": "string",
+            "description": "Exact confirmed appointment start in ISO 8601 including timezone offset.",
+        },
+        "confirmation_evidence": {
+            "type": "string",
+            "description": "Exact quote from the prospect's latest message confirming this appointment time.",
+        },
+    },
+    "required": ["start_iso", "confirmation_evidence"],
+    "additionalProperties": False,
+}
+
+CALENDAR_RESCHEDULE_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "start_iso": {
+            "type": "string",
+            "description": "Exact new appointment start in ISO 8601 including timezone offset.",
+        },
+        "confirmation_evidence": {
+            "type": "string",
+            "description": "Exact quote from the prospect's latest message confirming the new appointment time.",
+        },
+    },
+    "required": ["start_iso", "confirmation_evidence"],
+    "additionalProperties": False,
+}
+
+CALENDAR_CANCEL_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "confirmation_evidence": {
+            "type": "string",
+            "description": "Exact quote from the prospect's latest message requesting appointment cancellation.",
+        },
+    },
+    "required": ["confirmation_evidence"],
+    "additionalProperties": False,
+}
+
+CALENDAR_RULES = (
+    "Calendar rules: never invent availability. Use consultar_disponibilidad before offering appointment times. "
+    "Offer only slots returned by the tool. Before crear_cita or reprogramar_cita, require an explicit prospect "
+    "confirmation of one exact offered date and time; pass an exact quote from the latest prospect message as "
+    "confirmation_evidence. Never create or move a booking from an ambiguous answer. Use cancelar_cita only when "
+    "the prospect explicitly asks to cancel. After any successful calendar action, state the exact confirmed local "
+    "date and time returned by the tool. If availability changed, apologize briefly and offer fresh slots."
+)
+
+
+def _latest_user_message(db: Session, context: LeadContext) -> Message | None:
+    return db.scalar(
+        select(Message)
+        .where(Message.conversation_id == context.conversation_id, Message.role == "user")
+        .order_by(Message.created_at.desc(), Message.id.desc())
+        .limit(1)
+    )
+
+
+def _require_latest_user_evidence(db: Session, context: LeadContext, evidence: object) -> str:
+    if not isinstance(evidence, str) or not evidence.strip():
+        raise CalendarError("Exact confirmation evidence from the latest prospect message is required")
+    latest = _latest_user_message(db, context)
+    value = evidence.strip()
+    if not latest or value not in latest.content:
+        raise CalendarError("Calendar confirmation evidence must be quoted from the latest prospect message")
+    return value
+
 
 SALES_ADVISOR_RULES = (
     "Sales advisor handoff rules: you may offer advisor contact when the prospect shows sufficient commercial "
@@ -213,6 +301,46 @@ def enforce_lead_confirmation(text: str, tool_calls: list[dict]) -> str:
 
 
 async def execute_internal_tool(db: Session, name: str, args: dict, context: LeadContext) -> tuple[str, bool]:
+    if name == "consultar_disponibilidad":
+        try:
+            if not isinstance(args, dict):
+                raise CalendarError("Invalid calendar arguments")
+            result = await availability(
+                db,
+                context,
+                date=str(args.get("date") or ""),
+                part_of_day=args.get("part_of_day"),
+            )
+            return json.dumps(result, ensure_ascii=False, separators=(",", ":")), False
+        except (CalendarError, ValueError) as exc:
+            return f"Error: {exc}", True
+    if name == "crear_cita":
+        try:
+            if not isinstance(args, dict):
+                raise CalendarError("Invalid calendar arguments")
+            _require_latest_user_evidence(db, context, args.get("confirmation_evidence"))
+            result = await create_appointment(db, context, start_iso=str(args.get("start_iso") or ""))
+            return json.dumps(result, ensure_ascii=False, separators=(",", ":")), False
+        except (CalendarError, ValueError) as exc:
+            return f"Error: {exc}", True
+    if name == "reprogramar_cita":
+        try:
+            if not isinstance(args, dict):
+                raise CalendarError("Invalid calendar arguments")
+            _require_latest_user_evidence(db, context, args.get("confirmation_evidence"))
+            result = await reschedule_appointment(db, context, start_iso=str(args.get("start_iso") or ""))
+            return json.dumps(result, ensure_ascii=False, separators=(",", ":")), False
+        except (CalendarError, ValueError) as exc:
+            return f"Error: {exc}", True
+    if name == "cancelar_cita":
+        try:
+            if not isinstance(args, dict):
+                raise CalendarError("Invalid calendar arguments")
+            _require_latest_user_evidence(db, context, args.get("confirmation_evidence"))
+            result = await cancel_appointment(db, context)
+            return json.dumps(result, ensure_ascii=False, separators=(",", ":")), False
+        except (CalendarError, ValueError) as exc:
+            return f"Error: {exc}", True
     if name == "notify_sales_advisor":
         try:
             evidence = args.get("consent_evidence") if isinstance(args, dict) else None
