@@ -184,10 +184,15 @@ export function AgentToolsTab({ agentId, clientId, tools, onToolsChange }: {
 
       {calendar?.connected && (
         <div className="documents-list">
-          {["consultar_disponibilidad", "crear_cita", "reprogramar_cita", "cancelar_cita"].map((name) => (
+          {([
+            ["consultar_disponibilidad", "tools.calendar.tool_consultar_disponibilidad"],
+            ["crear_cita", "tools.calendar.tool_crear_cita"],
+            ["reprogramar_cita", "tools.calendar.tool_reprogramar_cita"],
+            ["cancelar_cita", "tools.calendar.tool_cancelar_cita"],
+          ] as const).map(([name, descriptionKey]) => (
             <div className="document-row" key={name}>
               <span className="document-icon"><CalendarDays size={18} /></span>
-              <div><strong>{name} <span className="pill">{t("tools.calendar.native")}</span></strong><small>{t(`tools.calendar.tool_${name}`)}</small></div>
+              <div><strong>{name} <span className="pill">{t("tools.calendar.native")}</span></strong><small>{t(descriptionKey)}</small></div>
             </div>
           ))}
         </div>
