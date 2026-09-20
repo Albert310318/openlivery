@@ -10,11 +10,17 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ...models import Agent, AgentTool, Lead, LeadConversation, Message
+from ...models import Agent, AgentTool, Client, Lead, LeadConversation, Message
 from ..ai import Completion, chat_completion
 from ..leads import LeadContext, trusted_whatsapp_phone
 from ..lead_handoffs import handoff_available
+from ..calendar import calendar_connected
 from .internal import (
+    CALENDAR_AVAILABILITY_TOOL_SCHEMA,
+    CALENDAR_CANCEL_TOOL_SCHEMA,
+    CALENDAR_CREATE_TOOL_SCHEMA,
+    CALENDAR_RESCHEDULE_TOOL_SCHEMA,
+    CALENDAR_RULES,
     LEAD_CAPTURE_RULES,
     LEAD_TOOL_SCHEMA,
     SALES_ADVISOR_RULES,
@@ -147,6 +153,36 @@ async def run_completion(
                 internal_name="create_or_update_lead",
             ),
         )
+        client = db.get(Client, tool_context.client_id)
+        calendar_is_connected = bool(client and calendar_connected(client))
+        if calendar_is_connected:
+            calendar_specs = [
+                ToolSpec(
+                    name="consultar_disponibilidad",
+                    description="Consult the client's real Google Calendar and return only appointment slots that are currently available.",
+                    input_schema=CALENDAR_AVAILABILITY_TOOL_SCHEMA,
+                    internal_name="consultar_disponibilidad",
+                ),
+                ToolSpec(
+                    name="crear_cita",
+                    description="Create a Google Calendar appointment only after the prospect explicitly confirms one exact offered time.",
+                    input_schema=CALENDAR_CREATE_TOOL_SCHEMA,
+                    internal_name="crear_cita",
+                ),
+                ToolSpec(
+                    name="reprogramar_cita",
+                    description="Move the current conversation's confirmed Google Calendar appointment after explicit confirmation of the new time.",
+                    input_schema=CALENDAR_RESCHEDULE_TOOL_SCHEMA,
+                    internal_name="reprogramar_cita",
+                ),
+                ToolSpec(
+                    name="cancelar_cita",
+                    description="Cancel the current conversation's confirmed appointment only when the prospect explicitly asks to cancel it.",
+                    input_schema=CALENDAR_CANCEL_TOOL_SCHEMA,
+                    internal_name="cancelar_cita",
+                ),
+            ]
+            specs[1:1] = calendar_specs
         if handoff_available(db, tool_context):
             specs.insert(
                 1,
@@ -166,6 +202,8 @@ async def run_completion(
             lead_rules = f"{lead_rules} {TRUSTED_WHATSAPP_LEAD_RULE}"
         if handoff_available(db, tool_context):
             lead_rules = f"{lead_rules} {SALES_ADVISOR_RULES}"
+        if calendar_is_connected:
+            lead_rules = f"{lead_rules} {CALENDAR_RULES}"
         qualification_rules = _sales_qualification_rules(db, agent, tool_context)
         if qualification_rules:
             lead_rules = f"{lead_rules} {qualification_rules}"
