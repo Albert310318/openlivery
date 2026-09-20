@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     # Meta Graph API root used by the WhatsApp Cloud API channel; override to
     # point at a mock server in tests.
     meta_graph_base_url: str = "https://graph.facebook.com/v23.0"
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    google_oauth_scope: str = "https://www.googleapis.com/auth/calendar"
+    google_oauth_authorize_url: str = "https://accounts.google.com/o/oauth2/v2/auth"
+    google_oauth_token_url: str = "https://oauth2.googleapis.com/token"
+    google_calendar_api_base_url: str = "https://www.googleapis.com/calendar/v3"
 
     model_config = SettingsConfigDict(
         env_file=(REPO_ROOT / ".env", APP_DIR / ".env"),
