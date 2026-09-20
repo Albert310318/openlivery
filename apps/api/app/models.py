@@ -94,6 +94,16 @@ class Client(Base):
     portal_domain_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     portal_domain_token: Mapped[str] = mapped_column(String(64), default="", server_default="")
     sales_advisor_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    google_calendar_refresh_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    google_calendar_id: Mapped[str] = mapped_column(String(255), default="primary", server_default="primary")
+    google_calendar_timezone: Mapped[str] = mapped_column(String(64), default="America/Lima", server_default="America/Lima")
+    calendar_workday_start: Mapped[str] = mapped_column(String(5), default="09:00", server_default="09:00")
+    calendar_workday_end: Mapped[str] = mapped_column(String(5), default="18:00", server_default="18:00")
+    calendar_working_days: Mapped[str] = mapped_column(String(20), default="0,1,2,3,4,5", server_default="0,1,2,3,4,5")
+    calendar_slot_minutes: Mapped[int] = mapped_column(Integer, default=30, server_default="30")
+    calendar_buffer_minutes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    calendar_min_notice_minutes: Mapped[int] = mapped_column(Integer, default=60, server_default="60")
+    calendar_booking_horizon_days: Mapped[int] = mapped_column(Integer, default=30, server_default="30")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
@@ -470,6 +480,28 @@ class LeadHandoff(Base):
 
     client: Mapped[Client] = relationship(back_populates="lead_handoffs")
     lead: Mapped[Lead] = relationship(back_populates="handoffs")
+
+
+class CalendarAppointment(Base):
+    __tablename__ = "calendar_appointments"
+    __table_args__ = (
+        UniqueConstraint("conversation_id", name="uq_calendar_appointments_conversation"),
+        CheckConstraint("status IN ('confirmed', 'cancelled')", name="ck_calendar_appointments_status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agents.id", ondelete="RESTRICT"), index=True)
+    lead_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("leads.id", ondelete="SET NULL"), nullable=True, index=True)
+    conversation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+    google_event_id: Mapped[str] = mapped_column(String(255))
+    calendar_id: Mapped[str] = mapped_column(String(255), default="primary", server_default="primary")
+    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(20), default="confirmed", server_default="confirmed")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 
 class Plan(Base):
