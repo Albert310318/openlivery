@@ -191,7 +191,7 @@ export default function AgentDetailPage() {
       <div className="qa-list">{qaPairs.map((pair) => <div className="qa-item" key={pair.id}><div><strong>{pair.question}</strong><small>{pair.answer}</small></div><button type="button" className="icon-button danger-icon" onClick={() => removeQA(pair)} title={t("agents.detail.delete")}><Trash2 size={16} /></button></div>)}{!qaPairs.length && <div className="inline-empty slim"><MessageSquareText size={22} /><div><strong>{t("agents.detail.qaEmpty")}</strong></div></div>}</div>
     </section></>}
 
-    {tab === "tools" && <AgentToolsTab agentId={id} tools={tools} onToolsChange={setTools} />}
+    {tab === "tools" && <AgentToolsTab agentId={id} clientId={agent.client_id} tools={tools} onToolsChange={setTools} />}
 
     {tab === "widget" && <form className="settings-form" onSubmit={saveWidget}>
       <section className="settings-section"><div className="settings-copy"><h3>{t("agents.detail.widgetHeading")}</h3><p>{t("agents.detail.widgetCopy")}</p></div><div className="settings-fields">
