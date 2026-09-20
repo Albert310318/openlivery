@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { CalendarDays, CheckCircle2, Pencil, Plus, Server, Trash2, Wrench, Zap } from "lucide-react";
 import { api, messageFrom } from "@/lib/api";
 import { useT } from "@/lib/i18n";
@@ -48,7 +48,7 @@ export function AgentToolsTab({ agentId, clientId, tools, onToolsChange }: {
     finally { setCalendarBusy(false); }
   }
 
-  async function saveCalendar(event: React.FormEvent<HTMLFormElement>) {
+  async function saveCalendar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     setCalendarBusy(true);
