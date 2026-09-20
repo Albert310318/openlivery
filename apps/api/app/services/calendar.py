@@ -187,10 +187,9 @@ async def create_appointment(
     existing = db.scalar(
         select(CalendarAppointment).where(
             CalendarAppointment.conversation_id == context.conversation_id,
-            CalendarAppointment.status == "confirmed",
         )
     )
-    if existing:
+    if existing and existing.status == "confirmed":
         raise CalendarError("This conversation already has a confirmed appointment; use reschedule instead")
 
     client = await _assert_slot_available(db, context, start_at)
@@ -221,18 +220,20 @@ async def create_appointment(
     if response.status_code >= 400:
         raise CalendarError("Could not create the Google Calendar appointment")
     event = response.json()
-    row = CalendarAppointment(
+    row = existing or CalendarAppointment(
         agency_id=context.agency_id,
         client_id=context.client_id,
         agent_id=context.agent_id,
-        lead_id=lead.id if lead else None,
         conversation_id=context.conversation_id,
-        google_event_id=event["id"],
-        calendar_id=calendar_id,
-        start_at=start_at,
-        end_at=end_at,
     )
-    db.add(row)
+    row.lead_id = lead.id if lead else None
+    row.google_event_id = event["id"]
+    row.calendar_id = calendar_id
+    row.start_at = start_at
+    row.end_at = end_at
+    row.status = "confirmed"
+    if existing is None:
+        db.add(row)
     db.commit()
     return {
         "ok": True,
