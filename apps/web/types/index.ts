@@ -119,6 +119,20 @@ export type AgentTool = {
 };
 export type ToolCallMeta = { name: string; arguments: Record<string, unknown>; result_preview: string; is_error: boolean };
 
+export type CalendarStatus = {
+  connected: boolean;
+  calendar_id: string;
+  timezone: string;
+  workday_start: string;
+  workday_end: string;
+  working_days: string;
+  slot_minutes: number;
+  buffer_minutes: number;
+  min_notice_minutes: number;
+  booking_horizon_days: number;
+  oauth_configured: boolean;
+};
+
 export type Source = { id: string; filename: string; excerpt: string };
 export type Message = { id: string; role: "user" | "assistant"; content: string; sources: Source[]; tool_calls?: ToolCallMeta[] | null; sender_type: "visitor" | "ai" | "human"; sender_name: string | null; created_at: string };
 export type ConversationLead = { id: string; name: string | null; phone: string | null; email: string | null; interest: string | null; budget: string | null; preferred_contact_time: string | null; status: string };
