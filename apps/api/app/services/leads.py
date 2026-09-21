@@ -68,6 +68,37 @@ def normalize_email(value: str | None) -> str | None:
         raise LeadCaptureError("The email address is not valid") from exc
 
 
+def budget_needs_clarification(industry: str | None, budget: str | None) -> bool:
+    """Flag obviously implausible budgets for industries where a tiny amount is not commercially meaningful.
+
+    This is intentionally conservative: it only applies to real-estate-like clients and
+    only to clearly tiny numeric amounts. It does not infer a realistic budget.
+    """
+    if not budget or not budget.strip():
+        return False
+    industry_plain = " ".join(re.findall(r"[a-z0-9]+", (industry or "").casefold()))
+    real_estate = any(
+        token in industry_plain
+        for token in ("inmobiliaria", "inmobiliario", "real estate", "bienes raices", "realty")
+    )
+    if not real_estate:
+        return False
+
+    value_plain = budget.casefold().strip()
+    if re.search(r"\b(un|uno|una)\s+(sol|soles|dolar|dolares|usd)\b", value_plain):
+        return True
+    if re.search(r"\b(mil|miles|millon|millones)\b", value_plain):
+        return False
+
+    matches = re.findall(r"\d[\d.,]*", value_plain)
+    if not matches:
+        return False
+    digits = re.sub(r"\D", "", matches[0])
+    if not digits:
+        return False
+    return int(digits) < 1000
+
+
 def normalize_phone(value: str | None) -> str | None:
     if not value or not value.strip():
         return None
