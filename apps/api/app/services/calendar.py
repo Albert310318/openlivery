@@ -86,6 +86,7 @@ async def availability(
     *,
     date: str,
     part_of_day: str | None = None,
+    max_slots: int | None = 12,
 ) -> dict:
     client = _client_for_context(db, context)
     if not calendar_connected(client):
@@ -146,7 +147,7 @@ async def availability(
                     break
         if available:
             slots.append(cursor.isoformat())
-            if len(slots) >= 12:
+            if max_slots is not None and len(slots) >= max_slots:
                 break
         cursor += duration
     return {"date": date, "timezone": client.google_calendar_timezone, "duration_minutes": slot_minutes, "slots": slots}
@@ -156,7 +157,12 @@ async def _assert_slot_available(db: Session, context: LeadContext, start_at: da
     client = _client_for_context(db, context)
     tz = ZoneInfo(client.google_calendar_timezone)
     local = start_at.astimezone(tz)
-    result = await availability(db, context, date=local.date().isoformat())
+    result = await availability(
+        db,
+        context,
+        date=local.date().isoformat(),
+        max_slots=None,
+    )
     if local.isoformat() not in result["slots"]:
         raise CalendarError("That appointment time is no longer available")
     return client
