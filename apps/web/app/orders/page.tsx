@@ -401,14 +401,15 @@ export default function OrdersPage() {
       {!orders.length ? <div className="inline-empty slim"><div><strong>{t("orders.noOrders")}</strong></div></div> :
       <div className="table-shell"><table className="data-table">
         <thead><tr>
-          <th>Pedido</th><th>{t("orders.customer")}</th><th>{t("orders.items")}</th><th>{t("orders.source")}</th>
+          <th>Pedido</th><th>{t("orders.customer")}</th><th>{t("orders.items")}</th><th>{t("orders.source")}</th><th>{t("orders.fulfillment")}</th>
           <th>{t("orders.total")}</th><th>{t("orders.payment")}</th><th>{t("orders.status")}</th><th>{t("orders.actions")}</th>
         </tr></thead>
         <tbody>{orders.map((order) => <tr key={order.order_id}>
           <td><strong>{order.code}</strong></td>
           <td>{order.customer_name || order.customer_phone || "—"}{order.waiter_name ? <><br /><span className="field-help">{t("orders.waiter")}: {order.waiter_name}</span></> : null}</td>
           <td>{order.items.map((item) => `${item.quantity}× ${item.name}`).join(", ") || "—"}</td>
-          <td>{order.table ? `Mesa ${order.table}` : order.source}</td>
+          <td>{order.source === "waiter" ? t("orders.waiterEntry") : order.source === "whatsapp" ? t("orders.whatsappEntry") : order.source}</td>
+          <td>{order.fulfillment_type === "table" ? `${t("orders.tableDestination")} ${order.table || ""}` : order.fulfillment_type === "delivery" ? t("orders.deliveryDestination") : order.fulfillment_type === "pickup" ? t("orders.pickupDestination") : "—"}</td>
           <td><strong>{order.currency} {order.total}</strong></td>
           <td>{t(PAYMENT_KEYS[order.payment_status] || "orders.paymentStatuses.pending")}</td>
           <td>{t(STATUS_KEYS[order.status] || "orders.statuses.draft")}</td>
