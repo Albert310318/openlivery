@@ -395,9 +395,6 @@ async def staff_waiter_order(
     client, staff = session
     if staff.role != "waiter":
         raise HTTPException(status_code=403, detail="Solo los meseros pueden registrar pedidos de mesa")
-    if not client.restaurant_kitchen_phone:
-        raise HTTPException(status_code=409, detail="El restaurante debe configurar el WhatsApp de cocina")
-
     requested_ids = {item.menu_item_id for item in payload.items}
     menu_rows = list(
         db.scalars(
@@ -450,17 +447,18 @@ async def staff_waiter_order(
     order.total = total
     db.flush()
 
-    try:
-        await _send_operational_whatsapp(
-            db,
-            client=client,
-            destination=client.restaurant_kitchen_phone,
-            text=_order_message(db, order, "👨‍🍳 PEDIDO DE MESA — PREPARAR"),
-        )
-    except HTTPException:
-        db.rollback()
-        raise
-    order.kitchen_sent_at = now_utc()
+    if client.restaurant_kitchen_phone:
+        try:
+            await _send_operational_whatsapp(
+                db,
+                client=client,
+                destination=client.restaurant_kitchen_phone,
+                text=_order_message(db, order, "👨‍🍳 PEDIDO DE MESA — PREPARAR"),
+            )
+            order.kitchen_sent_at = now_utc()
+        except HTTPException:
+            # The kitchen portal remains the source of truth; WhatsApp is only an optional alert.
+            pass
     db.commit()
     db.refresh(order)
     return order_payload(db, order, client)
