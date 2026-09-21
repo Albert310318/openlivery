@@ -6,7 +6,7 @@ import { PageHead } from "@/components/ui";
 import { useToast } from "@/components/toast";
 import { api, messageFrom } from "@/lib/api";
 import { useT, type I18nKey } from "@/lib/i18n";
-import type { Client, RestaurantMenuItem, RestaurantOrder, RestaurantSettings } from "@/types";
+import type { Client, RestaurantMenuItem, RestaurantOrder, RestaurantSettings, RestaurantStaffUser } from "@/types";
 
 const STATUS_KEYS: Record<string, I18nKey> = {
   draft: "orders.statuses.draft",
@@ -51,6 +51,7 @@ export default function OrdersPage() {
   const [settings, setSettings] = useState<RestaurantSettings | null>(null);
   const [menu, setMenu] = useState<RestaurantMenuItem[]>([]);
   const [orders, setOrders] = useState<RestaurantOrder[]>([]);
+  const [staff, setStaff] = useState<RestaurantStaffUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [tableLabel, setTableLabel] = useState("");
@@ -85,14 +86,16 @@ export default function OrdersPage() {
     if (!clientId) return;
     setLoading(true);
     try {
-      const [nextSettings, nextMenu, nextOrders] = await Promise.all([
+      const [nextSettings, nextMenu, nextOrders, nextStaff] = await Promise.all([
         api<RestaurantSettings>(`/restaurant/clients/${clientId}/settings`),
         api<RestaurantMenuItem[]>(`/restaurant/clients/${clientId}/menu?include_inactive=true`),
         api<RestaurantOrder[]>(`/restaurant/orders?client_id=${clientId}`),
+        api<RestaurantStaffUser[]>(`/restaurant/clients/${clientId}/staff`),
       ]);
       setSettings(nextSettings);
       setMenu(nextMenu);
       setOrders(nextOrders);
+      setStaff(nextStaff);
     } catch (error) {
       toast.error(messageFrom(error));
     } finally {
@@ -110,6 +113,47 @@ export default function OrdersPage() {
     setWaiterNotes("");
     setWaiterCart([]);
   }, [clientId]);
+
+  async function createStaffAccess(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!clientId) return;
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    setBusy(true);
+    try {
+      await api(`/restaurant/clients/${clientId}/staff`, {
+        method: "POST",
+        body: JSON.stringify({
+          name: String(data.get("name") || ""),
+          phone: String(data.get("phone") || ""),
+          password: String(data.get("password") || ""),
+          role: String(data.get("role") || "waiter"),
+        }),
+      });
+      form.reset();
+      toast.success(t("orders.staffCreated"));
+      await load();
+    } catch (error) {
+      toast.error(messageFrom(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleStaffAccess(item: RestaurantStaffUser) {
+    setBusy(true);
+    try {
+      await api(`/restaurant/staff-users/${item.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_active: !item.is_active }),
+      });
+      await load();
+    } catch (error) {
+      toast.error(messageFrom(error));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function saveSettings(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -265,6 +309,54 @@ export default function OrdersPage() {
     {selectedClient && settings && !settings.restaurant && (
       <div className="inline-empty slim"><div><strong>{selectedClient.name}</strong><span>{t("orders.notRestaurant")}</span></div></div>
     )}
+
+    {settings?.restaurant && selectedClient && <section className="panel">
+      <div className="panel-head">
+        <div><h3>{t("orders.staffTitle")}</h3><p>{t("orders.staffCopy")}</p></div>
+      </div>
+      <div className="settings-form">
+        <section className="settings-section">
+          <div className="settings-copy"><Users size={24} /></div>
+          <div className="settings-fields">
+            <label>{t("orders.staffPortal")}
+              <div className="form-grid">
+                <input readOnly value={`${typeof window !== "undefined" ? window.location.origin : ""}/restaurant/${selectedClient.portal_slug}`} />
+                <a className="button secondary" href={`/restaurant/${selectedClient.portal_slug}`} target="_blank" rel="noreferrer">{t("orders.openStaffPortal")}</a>
+              </div>
+            </label>
+            <form onSubmit={createStaffAccess}>
+              <div className="form-grid">
+                <label>{t("orders.staffName")}<input name="name" required /></label>
+                <label>{t("orders.staffPhone")}<input name="phone" required placeholder="+519..." /></label>
+              </div>
+              <div className="form-grid">
+                <label>{t("orders.staffRole")}
+                  <select name="role" defaultValue="waiter">
+                    <option value="waiter">{t("orders.roleWaiter")}</option>
+                    <option value="kitchen">{t("orders.roleKitchen")}</option>
+                    <option value="delivery">{t("orders.roleDelivery")}</option>
+                  </select>
+                </label>
+                <label>{t("orders.staffPassword")}<input name="password" type="password" minLength={6} required /></label>
+              </div>
+              <div className="form-footer">
+                <button className="button primary" disabled={busy}><Plus size={15} /> {t("orders.createStaff")}</button>
+              </div>
+            </form>
+            {staff.length > 0 && <div className="table-shell"><table className="data-table">
+              <thead><tr><th>{t("orders.staffName")}</th><th>{t("orders.staffPhone")}</th><th>{t("orders.staffRole")}</th><th>{t("orders.activeStaff")}</th><th></th></tr></thead>
+              <tbody>{staff.map((item) => <tr key={item.id}>
+                <td><strong>{item.name}</strong></td>
+                <td>{item.phone}</td>
+                <td>{item.role === "waiter" ? t("orders.roleWaiter") : item.role === "kitchen" ? t("orders.roleKitchen") : t("orders.roleDelivery")}</td>
+                <td>{item.is_active ? t("orders.activeStaff") : "—"}</td>
+                <td><button type="button" className="button tiny ghost" disabled={busy} onClick={() => void toggleStaffAccess(item)}>{item.is_active ? t("orders.deactivate") : t("orders.activate")}</button></td>
+              </tr>)}</tbody>
+            </table></div>}
+          </div>
+        </section>
+      </div>
+    </section>}
 
     {settings?.restaurant && <section className="panel">
       <div className="panel-head">
