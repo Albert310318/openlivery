@@ -119,6 +119,51 @@ export type AgentTool = {
 };
 export type ToolCallMeta = { name: string; arguments: Record<string, unknown>; result_preview: string; is_error: boolean };
 
+export type RestaurantSettings = {
+  restaurant: boolean;
+  currency: string;
+  payment_instructions: string;
+  kitchen_phone: string | null;
+  delivery_phone: string | null;
+};
+
+export type RestaurantMenuItem = {
+  id: string;
+  name: string;
+  aliases: string[];
+  description: string;
+  price: string;
+  currency: string;
+  is_active: boolean;
+};
+
+export type RestaurantOrderItem = {
+  name: string;
+  quantity: number;
+  unit_price: string;
+  line_total: string;
+  notes: string;
+};
+
+export type RestaurantOrder = {
+  order_id: string;
+  code: string;
+  source: string;
+  table: string | null;
+  fulfillment_type: string | null;
+  delivery_address: string | null;
+  customer_name: string | null;
+  customer_phone: string | null;
+  status: string;
+  payment_status: string;
+  payment_method: string | null;
+  currency: string;
+  subtotal: string;
+  total: string;
+  payment_instructions: string;
+  items: RestaurantOrderItem[];
+};
+
 export type CalendarStatus = {
   connected: boolean;
   calendar_id: string;
