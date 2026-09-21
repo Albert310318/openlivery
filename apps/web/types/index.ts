@@ -154,6 +154,7 @@ export type RestaurantOrder = {
   delivery_address: string | null;
   customer_name: string | null;
   customer_phone: string | null;
+  waiter_name: string | null;
   status: string;
   payment_status: string;
   payment_method: string | null;
