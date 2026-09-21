@@ -99,6 +99,24 @@ def budget_needs_clarification(industry: str | None, budget: str | None) -> bool
     return int(digits) < 1000
 
 
+def notes_need_clarification(industry: str | None, notes: str | None) -> bool:
+    """Flag obviously impossible purchase horizons in real-estate qualification notes."""
+    if not notes or not notes.strip():
+        return False
+    industry_plain = " ".join(re.findall(r"[a-z0-9]+", (industry or "").casefold()))
+    real_estate = any(
+        token in industry_plain
+        for token in ("inmobiliaria", "inmobiliario", "real estate", "bienes raices", "realty")
+    )
+    if not real_estate:
+        return False
+    plain = notes.casefold()
+    for raw in re.findall(r"\b(\d{2,})\s*(?:anos|años|year|years)\b", plain):
+        if int(raw) > 50:
+            return True
+    return False
+
+
 def normalize_phone(value: str | None) -> str | None:
     if not value or not value.strip():
         return None
