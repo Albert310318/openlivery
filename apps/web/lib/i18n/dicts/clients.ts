@@ -69,7 +69,7 @@ const en = {
     generalContext: "General context",
     generalContextHelp: "It combines with each agent's instructions and knowledge.",
     salesAdvisorPhone: "Sales advisor WhatsApp",
-    salesAdvisorPhoneHelp: "This WhatsApp receives a new-lead alert immediately and a second update when the prospect authorizes advisor contact.",
+    salesAdvisorPhoneHelp: "This WhatsApp receives one final lead summary when the prospect authorizes advisor contact."
     activeClient: "Active client",
     activeClientHint: "Allows using its agents.",
     deleteClient: "Delete client",
@@ -289,7 +289,7 @@ const es: typeof en = {
     generalContext: "Contexto general",
     generalContextHelp: "Se combina con las instrucciones y el conocimiento de cada agente.",
     salesAdvisorPhone: "WhatsApp del asesor comercial",
-    salesAdvisorPhoneHelp: "Este WhatsApp recibe una alerta apenas se registra un lead y una segunda actualización cuando el prospecto autoriza el contacto del asesor.",
+    salesAdvisorPhoneHelp: "Este WhatsApp recibe un único resumen final del lead cuando el prospecto autoriza el contacto del asesor."
     activeClient: "Cliente activo",
     activeClientHint: "Permite usar sus agentes.",
     deleteClient: "Eliminar cliente",
