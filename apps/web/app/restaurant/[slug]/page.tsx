@@ -1,6 +1,7 @@
 "use client";
 
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useParams } from "next/navigation";
 import { ChefHat, LoaderCircle, LogOut, PackageCheck, Plus, RefreshCw, ShoppingCart, Truck, Users } from "lucide-react";
 import { Alert } from "@/components/ui";
 import { api, ApiError, messageFrom } from "@/lib/api";
@@ -59,8 +60,8 @@ function sourceLabel(source: string) {
   return source;
 }
 
-export default function RestaurantStaffPortal({ params }: { params: { slug: string } }) {
-  const slug = params.slug;
+export default function RestaurantStaffPortal() {
+  const { slug } = useParams<{ slug: string }>();
   const [info, setInfo] = useState<PublicInfo | null>(null);
   const [session, setSession] = useState<StaffSession | null>(null);
   const [loading, setLoading] = useState(true);
