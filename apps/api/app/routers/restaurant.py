@@ -210,9 +210,6 @@ async def create_waiter_order(
     client = _client(db, user, client_id)
     if not is_restaurant_client(client):
         raise HTTPException(status_code=409, detail="Restaurant ordering is not enabled for this client")
-    if not client.restaurant_kitchen_phone:
-        raise HTTPException(status_code=409, detail="Configure the kitchen WhatsApp before sending waiter orders")
-
     requested_ids = {item.menu_item_id for item in payload.items}
     menu_rows = list(
         db.scalars(
@@ -266,18 +263,19 @@ async def create_waiter_order(
     order.total = total
     db.flush()
 
-    try:
-        await _send_staff_message(
-            db,
-            order,
-            client.restaurant_kitchen_phone,
-            _order_message(db, order, "👨‍🍳 PEDIDO DE MESA — PREPARAR"),
-        )
-    except HTTPException:
-        db.rollback()
-        raise
+    if client.restaurant_kitchen_phone:
+        try:
+            await _send_staff_message(
+                db,
+                order,
+                client.restaurant_kitchen_phone,
+                _order_message(db, order, "👨‍🍳 PEDIDO DE MESA — PREPARAR"),
+            )
+            order.kitchen_sent_at = now_utc()
+        except HTTPException:
+            # Kitchen staff can still see the order in their portal.
+            pass
 
-    order.kitchen_sent_at = now_utc()
     db.commit()
     db.refresh(order)
     return order_payload(db, order, client)
