@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..models import Client, Conversation, Lead, LeadConversation, LeadHandoff, Message, WhatsAppChannel, now_utc
-from .leads import LeadCaptureError, LeadContext, normalize_phone, trusted_whatsapp_phone
+from .leads import LeadCaptureError, LeadContext, budget_needs_clarification, normalize_phone, trusted_whatsapp_phone
 from .whatsapp import bridge_command
 
 
@@ -250,6 +250,8 @@ async def notify_sales_advisor(db: Session, context: LeadContext, consent_eviden
     if not lead:
         raise LeadHandoffError("The conversation does not have a verified lead to hand off")
     client = db.scalar(select(Client).where(Client.id == context.client_id, Client.agency_id == context.agency_id))
+    if client and budget_needs_clarification(client.industry, lead.budget):
+        raise LeadHandoffError("The lead budget is clearly implausible and must be clarified before handoff")
     channel = db.scalar(
         select(WhatsAppChannel).where(
             WhatsAppChannel.id == conversation.whatsapp_channel_id,
@@ -260,7 +262,16 @@ async def notify_sales_advisor(db: Session, context: LeadContext, consent_eviden
     )
     if not client or not client.sales_advisor_phone or not channel:
         raise LeadHandoffError("Sales advisor handoff configuration is invalid")
-    existing = db.scalar(select(LeadHandoff).where(LeadHandoff.consent_message_id == last_user.id))
+    existing = db.scalar(
+        select(LeadHandoff)
+        .where(
+            LeadHandoff.conversation_id == conversation.id,
+            LeadHandoff.lead_id == lead.id,
+            LeadHandoff.status.in_(("sending", "sent")),
+        )
+        .order_by(LeadHandoff.created_at.desc())
+        .limit(1)
+    )
     if existing:
         return {"ok": existing.status == "sent", "duplicate": True, "status": existing.status}
     handoff = LeadHandoff(
