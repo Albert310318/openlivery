@@ -155,30 +155,6 @@ export default function OrdersPage() {
     }
   }
 
-  async function saveSettings(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!clientId) return;
-    const data = new FormData(event.currentTarget);
-    setBusy(true);
-    try {
-      const updated = await api<RestaurantSettings>(`/restaurant/clients/${clientId}/settings`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          currency: String(data.get("currency") || "PEN"),
-          payment_instructions: String(data.get("payment_instructions") || ""),
-          kitchen_phone: String(data.get("kitchen_phone") || "") || null,
-          delivery_phone: String(data.get("delivery_phone") || "") || null,
-        }),
-      });
-      setSettings(updated);
-      toast.success(t("orders.settingsSaved"));
-    } catch (error) {
-      toast.error(messageFrom(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function addMenuItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!clientId) return;
@@ -433,26 +409,6 @@ export default function OrdersPage() {
           </div>
         </section>
       </div>
-    </section>}
-
-    {settings && <section className="panel">
-      <div className="panel-head">
-        <div><h3>{t("orders.settingsTitle")}</h3><p>{t("orders.settingsCopy")}</p></div>
-      </div>
-      <form className="settings-form" onSubmit={saveSettings}>
-        <section className="settings-section">
-          <div className="settings-copy"><ChefHat size={24} /></div>
-          <div className="settings-fields">
-            <div className="form-grid">
-              <label>{t("orders.currency")}<input name="currency" defaultValue={settings.currency} maxLength={3} /></label>
-              <label>{t("orders.kitchenPhone")}<input name="kitchen_phone" defaultValue={settings.kitchen_phone || ""} placeholder="+519..." /></label>
-            </div>
-            <label>{t("orders.deliveryPhone")}<input name="delivery_phone" defaultValue={settings.delivery_phone || ""} placeholder="+519..." /></label>
-            <label>{t("orders.paymentInstructions")}<textarea name="payment_instructions" defaultValue={settings.payment_instructions} placeholder={t("orders.paymentInstructionsPlaceholder")} rows={4} /></label>
-            <div className="form-footer"><button className="button secondary" disabled={busy}>{t("orders.saveSettings")}</button></div>
-          </div>
-        </section>
-      </form>
     </section>}
 
     {settings?.restaurant && <section className="panel">
