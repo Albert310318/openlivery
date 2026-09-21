@@ -536,10 +536,10 @@ class RestaurantOrder(Base):
             name="ck_restaurant_orders_status",
         ),
         CheckConstraint(
-            "payment_status IN ('pending','reported','confirmed','rejected')",
+            "payment_status IN ('pending','reported','confirmed','rejected','pay_at_table')",
             name="ck_restaurant_orders_payment_status",
         ),
-        CheckConstraint("source IN ('whatsapp','table','playground')", name="ck_restaurant_orders_source"),
+        CheckConstraint("source IN ('whatsapp','waiter','table','playground')", name="ck_restaurant_orders_source"),
         CheckConstraint(
             "fulfillment_type IS NULL OR fulfillment_type IN ('delivery','table','pickup')",
             name="ck_restaurant_orders_fulfillment",
@@ -550,8 +550,9 @@ class RestaurantOrder(Base):
     public_code: Mapped[str] = mapped_column(String(24), unique=True, index=True)
     agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
     client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
-    agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agents.id", ondelete="RESTRICT"), index=True)
-    conversation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agents.id", ondelete="SET NULL"), nullable=True, index=True)
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True, index=True)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     source: Mapped[str] = mapped_column(String(20))
     table_label: Mapped[str | None] = mapped_column(String(80), nullable=True)
     fulfillment_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
