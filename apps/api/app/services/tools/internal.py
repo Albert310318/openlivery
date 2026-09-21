@@ -10,6 +10,7 @@ from ...schemas_leads import LeadCaptureInput, LeadToolInput
 from ..leads import LeadCaptureError, LeadContext, LeadIdentityRequired, budget_needs_clarification, create_or_update_lead, notes_need_clarification
 from ..lead_handoffs import LeadHandoffError, notify_sales_advisor
 from ..calendar import CalendarError, availability, cancel_appointment, create_appointment, reschedule_appointment
+from ..restaurant import RestaurantOrderError, add_item, confirm_order, menu_payload, remove_item, report_payment, set_order_details, view_order
 
 
 LEAD_CAPTURE_RULES = (
@@ -179,6 +180,89 @@ def _require_latest_user_evidence(db: Session, context: LeadContext, evidence: o
     return value
 
 
+RESTAURANT_MENU_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "query": {"type": "string", "description": "Optional product/category search text."},
+    },
+    "additionalProperties": False,
+}
+
+RESTAURANT_ADD_ITEM_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "item_name": {"type": "string", "description": "Menu item name as requested by the customer."},
+        "quantity": {"type": "integer", "minimum": 1, "maximum": 99},
+        "notes": {"type": "string", "description": "Only explicit preparation notes from the customer."},
+        "evidence": {"type": "string", "description": "Exact quote from the latest customer message supporting this addition."},
+    },
+    "required": ["item_name", "quantity", "evidence"],
+    "additionalProperties": False,
+}
+
+RESTAURANT_REMOVE_ITEM_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "item_name": {"type": "string"},
+        "quantity": {"type": "integer", "minimum": 1, "maximum": 99},
+        "evidence": {"type": "string", "description": "Exact quote from the latest customer message supporting this change."},
+    },
+    "required": ["item_name", "evidence"],
+    "additionalProperties": False,
+}
+
+RESTAURANT_DETAILS_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "customer_name": {"type": "string"},
+        "fulfillment_type": {"type": "string", "enum": ["delivery", "table", "pickup"]},
+        "table_label": {"type": "string"},
+        "delivery_address": {"type": "string"},
+        "evidence": {"type": "string", "description": "Exact quote from the latest customer message supporting the supplied details."},
+    },
+    "required": ["evidence"],
+    "additionalProperties": False,
+}
+
+RESTAURANT_CONFIRM_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "confirmation_evidence": {
+            "type": "string",
+            "description": "Exact quote from the latest customer message explicitly confirming the complete order.",
+        },
+    },
+    "required": ["confirmation_evidence"],
+    "additionalProperties": False,
+}
+
+RESTAURANT_PAYMENT_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "method": {"type": "string", "description": "Payment method explicitly stated by the customer."},
+        "reference": {"type": "string", "description": "Optional operation/reference explicitly provided by the customer."},
+        "evidence": {
+            "type": "string",
+            "description": "Exact quote from the latest customer message saying payment was made/reported.",
+        },
+    },
+    "required": ["method", "evidence"],
+    "additionalProperties": False,
+}
+
+RESTAURANT_ORDER_RULES = (
+    "Restaurant order rules: act as a waiter, not as a sales-lead qualifier. Never invent menu items, prices, "
+    "discounts or totals. Use consultar_menu for menu/price questions and agregar_item_pedido for each customer "
+    "addition; the server is the only authority for arithmetic and totals. After changes, use ver_pedido when needed "
+    "and present a concise itemized summary. Before confirming the order, make sure delivery mode is known: delivery "
+    "requires an address; table requires a table identifier. Ask only for missing order information. "
+    "Do not mark an order paid merely because the customer says they paid. registrar_pago_reportado means payment "
+    "is awaiting human verification. Never say payment is confirmed or that the order went to kitchen until the "
+    "system status explicitly says so. A restaurant customer is an order/customer, not a CRM sales lead, so do not "
+    "ask for budget or preferred advisor-contact time and do not offer sales-advisor handoff. "
+)
+
+
 SALES_ADVISOR_RULES = (
     "Sales advisor handoff rules: you may offer advisor contact when the prospect shows sufficient commercial "
     "intent. Call notify_sales_advisor after the prospect explicitly accepts being contacted, or when the immediately "
@@ -301,6 +385,88 @@ def enforce_lead_confirmation(text: str, tool_calls: list[dict]) -> str:
 
 
 async def execute_internal_tool(db: Session, name: str, args: dict, context: LeadContext) -> tuple[str, bool]:
+    if name == "consultar_menu":
+        try:
+            query = args.get("query") if isinstance(args, dict) else None
+            result = menu_payload(db, context, query=query if isinstance(query, str) else None)
+            return json.dumps(result, ensure_ascii=False, separators=(",", ":")), False
+        except (RestaurantOrderError, ValueError) as exc:
+            return f"Error: {exc}", True
+    if name == "agregar_item_pedido":
+        try:
+            if not isinstance(args, dict):
+                raise RestaurantOrderError("Invalid order arguments")
+            _require_latest_user_evidence(db, context, args.get("evidence"))
+            result = add_item(
+                db,
+                context,
+                item_name=str(args.get("item_name") or ""),
+                quantity=int(args.get("quantity") or 0),
+                notes=str(args.get("notes") or ""),
+            )
+            return json.dumps(result, ensure_ascii=False, separators=(",", ":")), False
+        except (RestaurantOrderError, ValueError, TypeError) as exc:
+            return f"Error: {exc}", True
+    if name == "quitar_item_pedido":
+        try:
+            if not isinstance(args, dict):
+                raise RestaurantOrderError("Invalid order arguments")
+            _require_latest_user_evidence(db, context, args.get("evidence"))
+            quantity = args.get("quantity")
+            result = remove_item(
+                db,
+                context,
+                item_name=str(args.get("item_name") or ""),
+                quantity=int(quantity) if quantity is not None else None,
+            )
+            return json.dumps(result, ensure_ascii=False, separators=(",", ":")), False
+        except (RestaurantOrderError, ValueError, TypeError) as exc:
+            return f"Error: {exc}", True
+    if name == "configurar_entrega_pedido":
+        try:
+            if not isinstance(args, dict):
+                raise RestaurantOrderError("Invalid order arguments")
+            _require_latest_user_evidence(db, context, args.get("evidence"))
+            result = set_order_details(
+                db,
+                context,
+                customer_name=args.get("customer_name") if isinstance(args.get("customer_name"), str) else None,
+                fulfillment_type=args.get("fulfillment_type") if isinstance(args.get("fulfillment_type"), str) else None,
+                table_label=args.get("table_label") if isinstance(args.get("table_label"), str) else None,
+                delivery_address=args.get("delivery_address") if isinstance(args.get("delivery_address"), str) else None,
+            )
+            return json.dumps(result, ensure_ascii=False, separators=(",", ":")), False
+        except (RestaurantOrderError, ValueError) as exc:
+            return f"Error: {exc}", True
+    if name == "ver_pedido":
+        try:
+            result = view_order(db, context)
+            return json.dumps(result, ensure_ascii=False, separators=(",", ":")), False
+        except (RestaurantOrderError, ValueError) as exc:
+            return f"Error: {exc}", True
+    if name == "confirmar_pedido":
+        try:
+            if not isinstance(args, dict):
+                raise RestaurantOrderError("Invalid order arguments")
+            _require_latest_user_evidence(db, context, args.get("confirmation_evidence"))
+            result = confirm_order(db, context)
+            return json.dumps(result, ensure_ascii=False, separators=(",", ":")), False
+        except (RestaurantOrderError, ValueError) as exc:
+            return f"Error: {exc}", True
+    if name == "registrar_pago_reportado":
+        try:
+            if not isinstance(args, dict):
+                raise RestaurantOrderError("Invalid payment arguments")
+            _require_latest_user_evidence(db, context, args.get("evidence"))
+            result = report_payment(
+                db,
+                context,
+                method=str(args.get("method") or ""),
+                reference=args.get("reference") if isinstance(args.get("reference"), str) else None,
+            )
+            return json.dumps(result, ensure_ascii=False, separators=(",", ":")), False
+        except (RestaurantOrderError, ValueError) as exc:
+            return f"Error: {exc}", True
     if name == "consultar_disponibilidad":
         try:
             if not isinstance(args, dict):
