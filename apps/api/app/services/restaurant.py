@@ -11,6 +11,7 @@ from ..models import (
     RestaurantMenuItem,
     RestaurantOrder,
     RestaurantOrderItem,
+    RestaurantStaffUser,
     User,
     now_utc,
 )
@@ -151,7 +152,7 @@ def order_payload(db: Session, order: RestaurantOrder, client: Client | None = N
     if client is None:
         client = db.get(Client, order.client_id)
     rows = _items(db, order)
-    waiter = db.get(User, order.created_by_user_id) if order.created_by_user_id else None
+    waiter = db.get(RestaurantStaffUser, order.created_by_staff_id) if order.created_by_staff_id else (db.get(User, order.created_by_user_id) if order.created_by_user_id else None)
     return {
         "order_id": str(order.id),
         "code": order.public_code,
