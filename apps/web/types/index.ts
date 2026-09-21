@@ -127,6 +127,16 @@ export type RestaurantSettings = {
   delivery_phone: string | null;
 };
 
+export type RestaurantStaffUser = {
+  id: string;
+  client_id: string;
+  name: string;
+  phone: string;
+  role: "waiter" | "kitchen" | "delivery";
+  is_active: boolean;
+  created_at: string;
+};
+
 export type RestaurantMenuItem = {
   id: string;
   name: string;
