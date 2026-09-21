@@ -19,6 +19,7 @@ from .routers import (
     subscriptions,
     promotions,
     restaurant,
+    restaurant_staff,
     whatsapp,
     whatsapp_cloud,
     whatsapp_cloud_webhook,
@@ -72,3 +73,4 @@ app.include_router(subscriptions.router, prefix="/api")
 
 app.include_router(promotions.router, prefix="/api")
 app.include_router(restaurant.router, prefix="/api")
+app.include_router(restaurant_staff.router, prefix="/api")
