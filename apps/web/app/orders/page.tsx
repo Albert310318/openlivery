@@ -5,8 +5,29 @@ import { CheckCircle2, ChefHat, ClipboardList, Plus, RefreshCw, Truck } from "lu
 import { PageHead } from "@/components/ui";
 import { useToast } from "@/components/toast";
 import { api, messageFrom } from "@/lib/api";
-import { useT } from "@/lib/i18n";
+import { useT, type I18nKey } from "@/lib/i18n";
 import type { Client, RestaurantMenuItem, RestaurantOrder, RestaurantSettings } from "@/types";
+
+const STATUS_KEYS: Record<string, I18nKey> = {
+  draft: "orders.statuses.draft",
+  awaiting_confirmation: "orders.statuses.awaiting_confirmation",
+  awaiting_payment: "orders.statuses.awaiting_payment",
+  payment_reported: "orders.statuses.payment_reported",
+  paid: "orders.statuses.paid",
+  kitchen: "orders.statuses.kitchen",
+  ready: "orders.statuses.ready",
+  out_for_delivery: "orders.statuses.out_for_delivery",
+  served: "orders.statuses.served",
+  delivered: "orders.statuses.delivered",
+  cancelled: "orders.statuses.cancelled",
+};
+
+const PAYMENT_KEYS: Record<string, I18nKey> = {
+  pending: "orders.paymentStatuses.pending",
+  reported: "orders.paymentStatuses.reported",
+  confirmed: "orders.paymentStatuses.confirmed",
+  rejected: "orders.paymentStatuses.rejected",
+};
 
 function restaurantHint(client: Client): boolean {
   const text = \`\${client.industry} \${client.description}\`.toLowerCase();
