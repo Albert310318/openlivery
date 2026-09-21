@@ -21,6 +21,7 @@ from .knowledge import build_system_prompt, retrieve_knowledge
 from .leads import ensure_whatsapp_contact_lead, lead_context_from_conversation
 from .media import describe_image, transcribe_audio
 from .providers import resolve_agent_credentials, resolve_provider_credentials
+from .restaurant import is_restaurant_client
 from .subscriptions import prepare_activation_delivery
 from .tools import run_completion
 from .usage import record_usage
@@ -202,14 +203,14 @@ async def process_inbound(
         conversation,
         trusted_sender_jid=inbound.trusted_sender_jid,
     )
-    lead = None
-    lead_created = False
-    try:
-        lead, lead_created = ensure_whatsapp_contact_lead(db, lead_context)
-        db.commit()
-    except Exception:
-        logger.exception("Could not ensure WhatsApp lead for conversation_id=%s", conversation.id)
-        db.rollback()
+    restaurant_mode = is_restaurant_client(channel.agent.client)
+    if not restaurant_mode:
+        try:
+            ensure_whatsapp_contact_lead(db, lead_context)
+            db.commit()
+        except Exception:
+            logger.exception("Could not ensure WhatsApp lead for conversation_id=%s", conversation.id)
+            db.rollback()
 
     if conversation.mode == "human":
         return InboundResult(accepted=True, conversation_id=conversation.id, mode="human")
