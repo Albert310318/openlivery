@@ -15,6 +15,7 @@ from ..ai import Completion, chat_completion
 from ..leads import LeadContext, trusted_whatsapp_phone
 from ..lead_handoffs import handoff_available
 from ..calendar import calendar_connected
+from ..restaurant import is_restaurant_client
 from .internal import (
     CALENDAR_AVAILABILITY_TOOL_SCHEMA,
     CALENDAR_CANCEL_TOOL_SCHEMA,
@@ -23,6 +24,13 @@ from .internal import (
     CALENDAR_RULES,
     LEAD_CAPTURE_RULES,
     LEAD_TOOL_SCHEMA,
+    RESTAURANT_ADD_ITEM_TOOL_SCHEMA,
+    RESTAURANT_CONFIRM_TOOL_SCHEMA,
+    RESTAURANT_DETAILS_TOOL_SCHEMA,
+    RESTAURANT_MENU_TOOL_SCHEMA,
+    RESTAURANT_ORDER_RULES,
+    RESTAURANT_PAYMENT_TOOL_SCHEMA,
+    RESTAURANT_REMOVE_ITEM_TOOL_SCHEMA,
     SALES_ADVISOR_RULES,
     SALES_ADVISOR_TOOL_SCHEMA,
     TRUSTED_WHATSAPP_LEAD_RULE,
@@ -158,7 +166,56 @@ async def run_completion(
             ),
         )
         client = db.get(Client, tool_context.client_id)
-        calendar_is_connected = bool(client and calendar_connected(client))
+        restaurant_mode = is_restaurant_client(client)
+        if restaurant_mode:
+            specs = [spec for spec in specs if spec.name != "create_or_update_lead"]
+            restaurant_specs = [
+                ToolSpec(
+                    name="consultar_menu",
+                    description="Read the restaurant's active structured menu and server-side prices.",
+                    input_schema=RESTAURANT_MENU_TOOL_SCHEMA,
+                    internal_name="consultar_menu",
+                ),
+                ToolSpec(
+                    name="agregar_item_pedido",
+                    description="Add an explicitly requested menu item and quantity to the current order; totals are calculated by the server.",
+                    input_schema=RESTAURANT_ADD_ITEM_TOOL_SCHEMA,
+                    internal_name="agregar_item_pedido",
+                ),
+                ToolSpec(
+                    name="quitar_item_pedido",
+                    description="Remove or reduce an explicitly requested item from the current editable order.",
+                    input_schema=RESTAURANT_REMOVE_ITEM_TOOL_SCHEMA,
+                    internal_name="quitar_item_pedido",
+                ),
+                ToolSpec(
+                    name="configurar_entrega_pedido",
+                    description="Save explicit customer name, delivery/table/pickup mode, table identifier, or delivery address for the current order.",
+                    input_schema=RESTAURANT_DETAILS_TOOL_SCHEMA,
+                    internal_name="configurar_entrega_pedido",
+                ),
+                ToolSpec(
+                    name="ver_pedido",
+                    description="Return the current order with server-calculated prices and total.",
+                    input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                    internal_name="ver_pedido",
+                ),
+                ToolSpec(
+                    name="confirmar_pedido",
+                    description="Confirm the complete order only after the customer explicitly accepts the itemized order and total.",
+                    input_schema=RESTAURANT_CONFIRM_TOOL_SCHEMA,
+                    internal_name="confirmar_pedido",
+                ),
+                ToolSpec(
+                    name="registrar_pago_reportado",
+                    description="Record that the customer says they paid. This never confirms payment; human verification is still required.",
+                    input_schema=RESTAURANT_PAYMENT_TOOL_SCHEMA,
+                    internal_name="registrar_pago_reportado",
+                ),
+            ]
+            specs[0:0] = restaurant_specs
+            messages = _with_lead_rules(messages, RESTAURANT_ORDER_RULES)
+        calendar_is_connected = bool(client and calendar_connected(client)) and not restaurant_mode
         if calendar_is_connected:
             calendar_specs = [
                 ToolSpec(
@@ -187,7 +244,7 @@ async def run_completion(
                 ),
             ]
             specs[1:1] = calendar_specs
-        if handoff_available(db, tool_context):
+        if not restaurant_mode and handoff_available(db, tool_context):
             specs.insert(
                 1,
                 ToolSpec(
@@ -201,17 +258,18 @@ async def run_completion(
                     internal_name="notify_sales_advisor",
                 ),
             )
-        lead_rules = LEAD_CAPTURE_RULES
-        if has_trusted_whatsapp_phone:
-            lead_rules = f"{lead_rules} {TRUSTED_WHATSAPP_LEAD_RULE}"
-        if handoff_available(db, tool_context):
-            lead_rules = f"{lead_rules} {SALES_ADVISOR_RULES}"
-        if calendar_is_connected:
-            lead_rules = f"{lead_rules} {CALENDAR_RULES}"
-        qualification_rules = _sales_qualification_rules(db, agent, tool_context)
-        if qualification_rules:
-            lead_rules = f"{lead_rules} {qualification_rules}"
-        messages = _with_lead_rules(messages, lead_rules)
+        if not restaurant_mode:
+            lead_rules = LEAD_CAPTURE_RULES
+            if has_trusted_whatsapp_phone:
+                lead_rules = f"{lead_rules} {TRUSTED_WHATSAPP_LEAD_RULE}"
+            if handoff_available(db, tool_context):
+                lead_rules = f"{lead_rules} {SALES_ADVISOR_RULES}"
+            if calendar_is_connected:
+                lead_rules = f"{lead_rules} {CALENDAR_RULES}"
+            qualification_rules = _sales_qualification_rules(db, agent, tool_context)
+            if qualification_rules:
+                lead_rules = f"{lead_rules} {qualification_rules}"
+            messages = _with_lead_rules(messages, lead_rules)
     if not specs:
         return await chat_completion(agent.provider, base_url, api_key, model, messages, temperature=temperature, max_tokens=max_tokens)
     messages = _with_tool_rules(messages)
