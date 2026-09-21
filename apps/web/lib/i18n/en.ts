@@ -13,6 +13,7 @@ import { portal } from "./dicts/portal";
 import { inbox } from "./dicts/inbox";
 import { tools } from "./dicts/tools";
 import { leads } from "./dicts/leads";
+import { orders } from "./dicts/orders";
 
 export const en = {
   ...core.en,
@@ -26,6 +27,7 @@ export const en = {
   inbox: inbox.en,
   tools: tools.en,
   leads: leads.en,
+  orders: orders.en,
   subscriptions: subscriptions.en,
 };
 
