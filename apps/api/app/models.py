@@ -104,6 +104,10 @@ class Client(Base):
     calendar_buffer_minutes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     calendar_min_notice_minutes: Mapped[int] = mapped_column(Integer, default=60, server_default="60")
     calendar_booking_horizon_days: Mapped[int] = mapped_column(Integer, default=30, server_default="30")
+    restaurant_currency: Mapped[str] = mapped_column(String(3), default="PEN", server_default="PEN")
+    restaurant_payment_instructions: Mapped[str] = mapped_column(Text, default="", server_default="")
+    restaurant_kitchen_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    restaurant_delivery_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
@@ -500,6 +504,93 @@ class CalendarAppointment(Base):
     start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(20), default="confirmed", server_default="confirmed")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class RestaurantMenuItem(Base):
+    __tablename__ = "restaurant_menu_items"
+    __table_args__ = (
+        UniqueConstraint("client_id", "name", name="uq_restaurant_menu_item_client_name"),
+        CheckConstraint("price >= 0", name="ck_restaurant_menu_item_price"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(180))
+    aliases: Mapped[list] = mapped_column(JSON, default=list)
+    description: Mapped[str] = mapped_column(Text, default="", server_default="")
+    price: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    currency: Mapped[str] = mapped_column(String(3), default="PEN", server_default="PEN")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class RestaurantOrder(Base):
+    __tablename__ = "restaurant_orders"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft','awaiting_confirmation','awaiting_payment','payment_reported','paid','kitchen','ready','out_for_delivery','served','delivered','cancelled')",
+            name="ck_restaurant_orders_status",
+        ),
+        CheckConstraint(
+            "payment_status IN ('pending','reported','confirmed','rejected')",
+            name="ck_restaurant_orders_payment_status",
+        ),
+        CheckConstraint("source IN ('whatsapp','table','playground')", name="ck_restaurant_orders_source"),
+        CheckConstraint(
+            "fulfillment_type IS NULL OR fulfillment_type IN ('delivery','table','pickup')",
+            name="ck_restaurant_orders_fulfillment",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    public_code: Mapped[str] = mapped_column(String(24), unique=True, index=True)
+    agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agents.id", ondelete="RESTRICT"), index=True)
+    conversation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+    source: Mapped[str] = mapped_column(String(20))
+    table_label: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    fulfillment_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    delivery_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    customer_name: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    customer_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="draft", server_default="draft", index=True)
+    payment_status: Mapped[str] = mapped_column(String(20), default="pending", server_default="pending", index=True)
+    payment_method: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    payment_reference: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0, server_default="0")
+    total: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0, server_default="0")
+    currency: Mapped[str] = mapped_column(String(3), default="PEN", server_default="PEN")
+    customer_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    payment_reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    payment_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    kitchen_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class RestaurantOrderItem(Base):
+    __tablename__ = "restaurant_order_items"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_restaurant_order_items_quantity"),
+        CheckConstraint("unit_price >= 0", name="ck_restaurant_order_items_unit_price"),
+        CheckConstraint("line_total >= 0", name="ck_restaurant_order_items_line_total"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("restaurant_orders.id", ondelete="CASCADE"), index=True)
+    menu_item_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("restaurant_menu_items.id", ondelete="RESTRICT"), index=True)
+    item_name: Mapped[str] = mapped_column(String(180))
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    quantity: Mapped[int] = mapped_column(Integer)
+    line_total: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    notes: Mapped[str] = mapped_column(Text, default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
