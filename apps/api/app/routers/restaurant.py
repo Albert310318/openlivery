@@ -41,6 +41,18 @@ class MenuItemIn(BaseModel):
     is_active: bool = True
 
 
+class WaiterOrderItemIn(BaseModel):
+    menu_item_id: uuid.UUID
+    quantity: int = Field(ge=1, le=99)
+    notes: str = Field(default="", max_length=500)
+
+
+class WaiterOrderIn(BaseModel):
+    table_label: str = Field(min_length=1, max_length=80)
+    customer_name: str | None = Field(default=None, max_length=180)
+    items: list[WaiterOrderItemIn] = Field(min_length=1, max_length=60)
+
+
 class OrderStatusIn(BaseModel):
     status: str
 
@@ -186,6 +198,89 @@ def update_menu_item(
     item.is_active = payload.is_active
     db.commit()
     return {"id": str(item.id), "name": item.name, "price": str(item.price), "currency": item.currency, "is_active": item.is_active}
+
+
+@router.post("/clients/{client_id}/waiter-orders")
+async def create_waiter_order(
+    client_id: uuid.UUID,
+    payload: WaiterOrderIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    client = _client(db, user, client_id)
+    if not is_restaurant_client(client):
+        raise HTTPException(status_code=409, detail="Restaurant ordering is not enabled for this client")
+    if not client.restaurant_kitchen_phone:
+        raise HTTPException(status_code=409, detail="Configure the kitchen WhatsApp before sending waiter orders")
+
+    requested_ids = {item.menu_item_id for item in payload.items}
+    menu_rows = list(
+        db.scalars(
+            select(RestaurantMenuItem).where(
+                RestaurantMenuItem.id.in_(requested_ids),
+                RestaurantMenuItem.agency_id == client.agency_id,
+                RestaurantMenuItem.client_id == client.id,
+                RestaurantMenuItem.is_active.is_(True),
+            )
+        ).all()
+    )
+    by_id = {item.id: item for item in menu_rows}
+    if len(by_id) != len(requested_ids):
+        raise HTTPException(status_code=422, detail="One or more menu items are invalid or inactive")
+
+    order = RestaurantOrder(
+        public_code=f"PED-{uuid.uuid4().hex[:8].upper()}",
+        agency_id=client.agency_id,
+        client_id=client.id,
+        agent_id=None,
+        conversation_id=None,
+        created_by_user_id=user.id,
+        source="waiter",
+        table_label=payload.table_label.strip(),
+        fulfillment_type="table",
+        customer_name=payload.customer_name.strip() if payload.customer_name else None,
+        status="kitchen",
+        payment_status="pay_at_table",
+        currency=client.restaurant_currency or "PEN",
+    )
+    db.add(order)
+    db.flush()
+
+    total = Decimal("0.00")
+    for requested in payload.items:
+        menu_item = by_id[requested.menu_item_id]
+        line_total = menu_item.price * requested.quantity
+        total += line_total
+        db.add(
+            RestaurantOrderItem(
+                order_id=order.id,
+                menu_item_id=menu_item.id,
+                item_name=menu_item.name,
+                unit_price=menu_item.price,
+                quantity=requested.quantity,
+                line_total=line_total,
+                notes=requested.notes.strip(),
+            )
+        )
+    order.subtotal = total
+    order.total = total
+    db.flush()
+
+    try:
+        await _send_staff_message(
+            db,
+            order,
+            client.restaurant_kitchen_phone,
+            _order_message(db, order, "👨‍🍳 PEDIDO DE MESA — PREPARAR"),
+        )
+    except HTTPException:
+        db.rollback()
+        raise
+
+    order.kitchen_sent_at = now_utc()
+    db.commit()
+    db.refresh(order)
+    return order_payload(db, order, client)
 
 
 @router.get("/orders")
