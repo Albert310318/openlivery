@@ -528,6 +528,27 @@ class RestaurantMenuItem(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 
+class RestaurantStaffUser(Base):
+    __tablename__ = "restaurant_staff_users"
+    __table_args__ = (
+        UniqueConstraint("client_id", "phone_normalized", name="uq_restaurant_staff_client_phone"),
+        CheckConstraint("role IN ('waiter','kitchen','delivery')", name="ck_restaurant_staff_role"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(180))
+    phone: Mapped[str] = mapped_column(String(40))
+    phone_normalized: Mapped[str] = mapped_column(String(32), index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(20), index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    credentials_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
 class RestaurantOrder(Base):
     __tablename__ = "restaurant_orders"
     __table_args__ = (
@@ -553,6 +574,7 @@ class RestaurantOrder(Base):
     agent_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agents.id", ondelete="SET NULL"), nullable=True, index=True)
     conversation_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True, index=True)
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_by_staff_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("restaurant_staff_users.id", ondelete="SET NULL"), nullable=True, index=True)
     source: Mapped[str] = mapped_column(String(20))
     table_label: Mapped[str | None] = mapped_column(String(80), nullable=True)
     fulfillment_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
