@@ -5,9 +5,9 @@ import unicodedata
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ...models import Lead, LeadConversation, Message
+from ...models import Client, Lead, LeadConversation, Message
 from ...schemas_leads import LeadCaptureInput, LeadToolInput
-from ..leads import LeadCaptureError, LeadContext, LeadIdentityRequired, create_or_update_lead
+from ..leads import LeadCaptureError, LeadContext, LeadIdentityRequired, budget_needs_clarification, create_or_update_lead
 from ..lead_handoffs import LeadHandoffError, notify_sales_advisor
 from ..calendar import CalendarError, availability, cancel_appointment, create_appointment, reschedule_appointment
 
@@ -355,6 +355,27 @@ async def execute_internal_tool(db: Session, name: str, args: dict, context: Lea
     try:
         tool_payload = LeadToolInput.model_validate(args)
         _validate_user_evidence(db, context, tool_payload)
+        if "budget" in tool_payload.model_fields_set and tool_payload.budget is not None:
+            client = db.scalar(
+                select(Client).where(
+                    Client.id == context.client_id,
+                    Client.agency_id == context.agency_id,
+                )
+            )
+            if client and budget_needs_clarification(client.industry, tool_payload.budget):
+                return json.dumps(
+                    {
+                        "ok": False,
+                        "skipped": True,
+                        "reason": "budget_needs_clarification",
+                        "instruction": (
+                            "The stated budget is clearly implausible for this business context. "
+                            "Do not save it as a real budget. Ask one brief clarification question."
+                        ),
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ), False
         payload = LeadCaptureInput.model_validate(tool_payload.model_dump(exclude={"evidence"}))
         result = create_or_update_lead(db, context, payload)
     except LeadIdentityRequired:
