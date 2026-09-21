@@ -30,7 +30,7 @@ const PAYMENT_KEYS: Record<string, I18nKey> = {
 };
 
 function restaurantHint(client: Client): boolean {
-  const text = \`\${client.industry} \${client.description}\`.toLowerCase();
+  const text = `${client.industry} ${client.description}`.toLowerCase();
   return /(restaurant|restaurante|poller|pizzer|cafeter|comida|gastronom|cevicher)/.test(text);
 }
 
@@ -65,9 +65,9 @@ export default function OrdersPage() {
     setLoading(true);
     try {
       const [nextSettings, nextMenu, nextOrders] = await Promise.all([
-        api<RestaurantSettings>(\`/restaurant/clients/\${clientId}/settings\`),
-        api<RestaurantMenuItem[]>(\`/restaurant/clients/\${clientId}/menu?include_inactive=true\`),
-        api<RestaurantOrder[]>(\`/restaurant/orders?client_id=\${clientId}\`),
+        api<RestaurantSettings>(`/restaurant/clients/${clientId}/settings`),
+        api<RestaurantMenuItem[]>(`/restaurant/clients/${clientId}/menu?include_inactive=true`),
+        api<RestaurantOrder[]>(`/restaurant/orders?client_id=${clientId}`),
       ]);
       setSettings(nextSettings);
       setMenu(nextMenu);
@@ -87,7 +87,7 @@ export default function OrdersPage() {
     const data = new FormData(event.currentTarget);
     setBusy(true);
     try {
-      const updated = await api<RestaurantSettings>(\`/restaurant/clients/\${clientId}/settings\`, {
+      const updated = await api<RestaurantSettings>(`/restaurant/clients/${clientId}/settings`, {
         method: "PATCH",
         body: JSON.stringify({
           currency: String(data.get("currency") || "PEN"),
@@ -112,7 +112,7 @@ export default function OrdersPage() {
     const data = new FormData(form);
     setBusy(true);
     try {
-      await api(\`/restaurant/clients/\${clientId}/menu\`, {
+      await api(`/restaurant/clients/${clientId}/menu`, {
         method: "POST",
         body: JSON.stringify({
           name: String(data.get("name") || ""),
@@ -137,9 +137,9 @@ export default function OrdersPage() {
     setBusy(true);
     try {
       if (kind === "confirm-payment" || kind === "ready") {
-        await api(\`/restaurant/orders/\${order.order_id}/\${kind}\`, { method: "POST" });
+        await api(`/restaurant/orders/${order.order_id}/${kind}`, { method: "POST" });
       } else {
-        await api(\`/restaurant/orders/\${order.order_id}/status\`, {
+        await api(`/restaurant/orders/${order.order_id}/status`, {
           method: "POST",
           body: JSON.stringify({ status: kind }),
         });
@@ -239,11 +239,11 @@ export default function OrdersPage() {
         <tbody>{orders.map((order) => <tr key={order.order_id}>
           <td><strong>{order.code}</strong></td>
           <td>{order.customer_name || order.customer_phone || "—"}</td>
-          <td>{order.items.map((item) => \`\${item.quantity}× \${item.name}\`).join(", ") || "—"}</td>
-          <td>{order.table ? \`Mesa \${order.table}\` : order.source}</td>
+          <td>{order.items.map((item) => `${item.quantity}× ${item.name}`).join(", ") || "—"}</td>
+          <td>{order.table ? `Mesa ${order.table}` : order.source}</td>
           <td><strong>{order.currency} {order.total}</strong></td>
-          <td>{t(\`orders.paymentStatuses.\${order.payment_status}\` as const)}</td>
-          <td>{t(\`orders.statuses.\${order.status}\` as const)}</td>
+          <td>{t(`orders.paymentStatuses.${order.payment_status}` as const)}</td>
+          <td>{t(`orders.statuses.${order.status}` as const)}</td>
           <td><div className="table-actions">
             {order.payment_status === "reported" && <button className="button tiny primary" disabled={busy} onClick={() => void action(order, "confirm-payment")}>{t("orders.confirmPayment")}</button>}
             {(order.status === "kitchen" || order.status === "paid") && <button className="button tiny secondary" disabled={busy} onClick={() => void action(order, "ready")}>{t("orders.markReady")}</button>}
