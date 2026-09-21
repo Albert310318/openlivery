@@ -53,6 +53,38 @@ def decode_portal_token(token: str) -> dict | None:
         return None
 
 
+def create_restaurant_staff_token(
+    staff_id: str,
+    client_id: str,
+    portal_slug: str,
+    credentials_version: int = 0,
+) -> str:
+    settings = get_settings()
+    expires = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_minutes)
+    return jwt.encode(
+        {
+            "sub": staff_id,
+            "client_id": client_id,
+            "portal_slug": portal_slug,
+            "type": "restaurant_staff",
+            "credentials_version": credentials_version,
+            "exp": expires,
+        },
+        settings.secret_key,
+        algorithm="HS256",
+    )
+
+
+def decode_restaurant_staff_token(token: str) -> dict | None:
+    try:
+        payload = jwt.decode(token, get_settings().secret_key, algorithms=["HS256"])
+        if payload.get("type") != "restaurant_staff":
+            return None
+        return payload
+    except jwt.PyJWTError:
+        return None
+
+
 def _fernet() -> Fernet:
     digest = hashlib.sha256(get_settings().encryption_key.encode()).digest()
     return Fernet(base64.urlsafe_b64encode(digest))
