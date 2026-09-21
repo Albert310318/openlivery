@@ -11,6 +11,7 @@ from ..models import (
     RestaurantMenuItem,
     RestaurantOrder,
     RestaurantOrderItem,
+    User,
     now_utc,
 )
 from .leads import LeadContext, trusted_whatsapp_phone
@@ -150,6 +151,7 @@ def order_payload(db: Session, order: RestaurantOrder, client: Client | None = N
     if client is None:
         client = db.get(Client, order.client_id)
     rows = _items(db, order)
+    waiter = db.get(User, order.created_by_user_id) if order.created_by_user_id else None
     return {
         "order_id": str(order.id),
         "code": order.public_code,
@@ -159,6 +161,7 @@ def order_payload(db: Session, order: RestaurantOrder, client: Client | None = N
         "delivery_address": order.delivery_address,
         "customer_name": order.customer_name,
         "customer_phone": order.customer_phone,
+        "waiter_name": waiter.name if waiter else None,
         "status": order.status,
         "payment_status": order.payment_status,
         "payment_method": order.payment_method,
