@@ -1,7 +1,7 @@
 "use client";
 
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, ChefHat, ClipboardList, Plus, RefreshCw, Truck } from "lucide-react";
+import { CheckCircle2, ChefHat, ClipboardList, MessageCircle, Plus, RefreshCw, ShoppingCart, Truck, Users } from "lucide-react";
 import { PageHead } from "@/components/ui";
 import { useToast } from "@/components/toast";
 import { api, messageFrom } from "@/lib/api";
@@ -27,6 +27,15 @@ const PAYMENT_KEYS: Record<string, I18nKey> = {
   reported: "orders.paymentStatuses.reported",
   confirmed: "orders.paymentStatuses.confirmed",
   rejected: "orders.paymentStatuses.rejected",
+  pay_at_table: "orders.paymentStatuses.pay_at_table",
+};
+
+type WaiterCartItem = {
+  menu_item_id: string;
+  name: string;
+  quantity: number;
+  notes: string;
+  unitPrice: number;
 };
 
 function restaurantHint(client: Client): boolean {
@@ -44,6 +53,12 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<RestaurantOrder[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [tableLabel, setTableLabel] = useState("");
+  const [customerName, setCustomerName] = useState("");
+  const [selectedMenuItemId, setSelectedMenuItemId] = useState("");
+  const [waiterQuantity, setWaiterQuantity] = useState(1);
+  const [waiterNotes, setWaiterNotes] = useState("");
+  const [waiterCart, setWaiterCart] = useState<WaiterCartItem[]>([]);
 
   useEffect(() => {
     api<Client[]>("/clients")
@@ -59,6 +74,12 @@ export default function OrdersPage() {
     () => clients.find((client) => client.id === clientId) || null,
     [clients, clientId],
   );
+  const activeMenu = useMemo(() => menu.filter((item) => item.is_active), [menu]);
+  const waiterTotal = useMemo(
+    () => waiterCart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
+    [waiterCart],
+  );
+
 
   const load = useCallback(async () => {
     if (!clientId) return;
@@ -80,6 +101,15 @@ export default function OrdersPage() {
   }, [clientId, toast]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    setTableLabel("");
+    setCustomerName("");
+    setSelectedMenuItemId("");
+    setWaiterQuantity(1);
+    setWaiterNotes("");
+    setWaiterCart([]);
+  }, [clientId]);
 
   async function saveSettings(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -133,6 +163,67 @@ export default function OrdersPage() {
     }
   }
 
+  function addWaiterItem() {
+    const menuItem = activeMenu.find((item) => item.id === selectedMenuItemId);
+    if (!menuItem || waiterQuantity < 1) return;
+    const notes = waiterNotes.trim();
+    setWaiterCart((current) => {
+      const index = current.findIndex(
+        (item) => item.menu_item_id === menuItem.id && item.notes === notes,
+      );
+      if (index === -1) {
+        return [
+          ...current,
+          {
+            menu_item_id: menuItem.id,
+            name: menuItem.name,
+            quantity: waiterQuantity,
+            notes,
+            unitPrice: Number(menuItem.price),
+          },
+        ];
+      }
+      return current.map((item, itemIndex) => (
+        itemIndex === index ? { ...item, quantity: item.quantity + waiterQuantity } : item
+      ));
+    });
+    setSelectedMenuItemId("");
+    setWaiterQuantity(1);
+    setWaiterNotes("");
+  }
+
+  function removeWaiterItem(index: number) {
+    setWaiterCart((current) => current.filter((_, itemIndex) => itemIndex !== index));
+  }
+
+  async function sendWaiterOrder() {
+    if (!clientId || !tableLabel.trim() || waiterCart.length === 0) return;
+    setBusy(true);
+    try {
+      await api<RestaurantOrder>(`/restaurant/clients/${clientId}/waiter-orders`, {
+        method: "POST",
+        body: JSON.stringify({
+          table_label: tableLabel.trim(),
+          customer_name: customerName.trim() || null,
+          items: waiterCart.map((item) => ({
+            menu_item_id: item.menu_item_id,
+            quantity: item.quantity,
+            notes: item.notes,
+          })),
+        }),
+      });
+      toast.success(t("orders.waiterOrderSent"));
+      setTableLabel("");
+      setCustomerName("");
+      setWaiterCart([]);
+      await load();
+    } catch (error) {
+      toast.error(messageFrom(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function action(order: RestaurantOrder, kind: "confirm-payment" | "ready" | "out_for_delivery" | "served" | "delivered" | "cancelled") {
     setBusy(true);
     try {
@@ -174,6 +265,83 @@ export default function OrdersPage() {
     {selectedClient && settings && !settings.restaurant && (
       <div className="inline-empty slim"><div><strong>{selectedClient.name}</strong><span>{t("orders.notRestaurant")}</span></div></div>
     )}
+
+    {settings?.restaurant && <section className="panel">
+      <div className="panel-head">
+        <div><h3>{t("orders.entriesTitle")}</h3><p>{t("orders.entriesCopy")}</p></div>
+      </div>
+      <div className="settings-form">
+        <section className="settings-section">
+          <div className="settings-copy"><MessageCircle size={24} /></div>
+          <div className="settings-fields">
+            <strong>{t("orders.whatsappEntry")}</strong>
+            <p>{t("orders.whatsappEntryCopy")}</p>
+          </div>
+        </section>
+        <section className="settings-section">
+          <div className="settings-copy"><Users size={24} /></div>
+          <div className="settings-fields">
+            <strong>{t("orders.waiterEntry")}</strong>
+            <p>{t("orders.waiterEntryCopy")}</p>
+          </div>
+        </section>
+      </div>
+    </section>}
+
+    {settings?.restaurant && <section className="panel">
+      <div className="panel-head">
+        <div><h3>{t("orders.waiterOrderTitle")}</h3><p>{t("orders.waiterEntryCopy")}</p></div>
+        <ShoppingCart size={22} />
+      </div>
+      <div className="settings-form">
+        <section className="settings-section">
+          <div className="settings-copy"><Users size={24} /></div>
+          <div className="settings-fields">
+            <div className="form-grid">
+              <label>{t("orders.table")}<input value={tableLabel} onChange={(event) => setTableLabel(event.target.value)} placeholder="8" /></label>
+              <label>{t("orders.customerOptional")}<input value={customerName} onChange={(event) => setCustomerName(event.target.value)} /></label>
+            </div>
+            <div className="form-grid">
+              <label>{t("orders.product")}
+                <select value={selectedMenuItemId} onChange={(event) => setSelectedMenuItemId(event.target.value)}>
+                  <option value="">—</option>
+                  {activeMenu.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.currency} {item.price}</option>)}
+                </select>
+              </label>
+              <label>{t("orders.quantity")}<input type="number" min={1} max={99} value={waiterQuantity} onChange={(event) => setWaiterQuantity(Math.max(1, Number(event.target.value) || 1))} /></label>
+            </div>
+            <label>{t("orders.notes")}<input value={waiterNotes} onChange={(event) => setWaiterNotes(event.target.value)} placeholder="Sin cebolla, término, extras…" /></label>
+            <div className="form-footer">
+              <button type="button" className="button secondary" disabled={!selectedMenuItemId || busy} onClick={addWaiterItem}>
+                <Plus size={15} /> {t("orders.addToTicket")}
+              </button>
+            </div>
+
+            <div className="table-shell">
+              <table className="data-table">
+                <thead><tr><th>{t("orders.product")}</th><th>{t("orders.quantity")}</th><th>{t("orders.notes")}</th><th>{t("orders.total")}</th><th></th></tr></thead>
+                <tbody>
+                  {waiterCart.map((item, index) => <tr key={`${item.menu_item_id}-${item.notes}-${index}`}>
+                    <td><strong>{item.name}</strong></td>
+                    <td>{item.quantity}</td>
+                    <td>{item.notes || "—"}</td>
+                    <td>{settings.currency} {(item.unitPrice * item.quantity).toFixed(2)}</td>
+                    <td><button type="button" className="button tiny ghost" onClick={() => removeWaiterItem(index)}>{t("orders.remove")}</button></td>
+                  </tr>)}
+                  {!waiterCart.length && <tr><td colSpan={5}>—</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            <div className="form-footer">
+              <strong>{t("orders.total")}: {settings.currency} {waiterTotal.toFixed(2)}</strong>
+              <button type="button" className="button primary" disabled={busy || !tableLabel.trim() || waiterCart.length === 0} onClick={() => void sendWaiterOrder()}>
+                <ChefHat size={15} /> {t("orders.sendKitchen")}
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>}
 
     {settings && <section className="panel">
       <div className="panel-head">
@@ -238,7 +406,7 @@ export default function OrdersPage() {
         </tr></thead>
         <tbody>{orders.map((order) => <tr key={order.order_id}>
           <td><strong>{order.code}</strong></td>
-          <td>{order.customer_name || order.customer_phone || "—"}</td>
+          <td>{order.customer_name || order.customer_phone || "—"}{order.waiter_name ? <><br /><span className="field-help">{t("orders.waiter")}: {order.waiter_name}</span></> : null}</td>
           <td>{order.items.map((item) => `${item.quantity}× ${item.name}`).join(", ") || "—"}</td>
           <td>{order.table ? `Mesa ${order.table}` : order.source}</td>
           <td><strong>{order.currency} {order.total}</strong></td>
