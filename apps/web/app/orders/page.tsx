@@ -242,8 +242,8 @@ export default function OrdersPage() {
           <td>{order.items.map((item) => `${item.quantity}× ${item.name}`).join(", ") || "—"}</td>
           <td>{order.table ? `Mesa ${order.table}` : order.source}</td>
           <td><strong>{order.currency} {order.total}</strong></td>
-          <td>{t(`orders.paymentStatuses.${order.payment_status}` as const)}</td>
-          <td>{t(`orders.statuses.${order.status}` as const)}</td>
+          <td>{t(PAYMENT_KEYS[order.payment_status] || "orders.paymentStatuses.pending")}</td>
+          <td>{t(STATUS_KEYS[order.status] || "orders.statuses.draft")}</td>
           <td><div className="table-actions">
             {order.payment_status === "reported" && <button className="button tiny primary" disabled={busy} onClick={() => void action(order, "confirm-payment")}>{t("orders.confirmPayment")}</button>}
             {(order.status === "kitchen" || order.status === "paid") && <button className="button tiny secondary" disabled={busy} onClick={() => void action(order, "ready")}>{t("orders.markReady")}</button>}
