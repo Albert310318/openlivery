@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ReactNode, useEffect, useState } from "react";
-import { BarChart3, Bot, Building2, ContactRound, CreditCard, Inbox, LayoutDashboard, LogOut, Menu, MessageSquareText, Radio, Settings, Settings2, ShoppingBag, Sparkles, UsersRound, Wallet, X } from "lucide-react";
+import { BarChart3, Bot, Building2, ClipboardList, ContactRound, CreditCard, Inbox, LayoutDashboard, LogOut, Menu, MessageSquareText, Radio, Settings, Settings2, ShoppingBag, Sparkles, UsersRound, Wallet, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { useT, type I18nKey } from "@/lib/i18n";
 import { LanguageSwitcher } from "@/components/language-switcher";
@@ -18,6 +18,7 @@ const navigation: { href: string; labelKey: I18nKey; icon: typeof LayoutDashboar
   { href: "/inbox", labelKey: "nav.inbox", icon: Inbox },
   { href: "/leads", labelKey: "nav.leads", icon: ContactRound },
   { href: "/reports", labelKey: "nav.reports", icon: BarChart3 },
+  { href: "/orders", labelKey: "nav.orders", icon: ClipboardList },
   { href: "/playground", labelKey: "nav.playground", icon: MessageSquareText },
   { href: "/channels", labelKey: "nav.channels", icon: Radio },
   { href: "/settings", labelKey: "nav.settings", icon: Settings },

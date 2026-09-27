@@ -11,6 +11,7 @@ import { portal } from "./dicts/portal";
 import { inbox } from "./dicts/inbox";
 import { tools } from "./dicts/tools";
 import { leads } from "./dicts/leads";
+import { orders } from "./dicts/orders";
 
 // Spanish dictionary. Composed from the same modules; typed as Dictionary so it
 // must mirror the exact shape of `en` (each area's `es` mirrors its own `en`).
@@ -26,5 +27,6 @@ export const es: Dictionary = {
   inbox: inbox.es,
   tools: tools.es,
   leads: leads.es,
+  orders: orders.es,
   subscriptions: subscriptions.es,
 };

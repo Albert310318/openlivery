@@ -18,10 +18,11 @@ from sqlalchemy.orm import Session, selectinload
 from ..config import trial_activation_eligible_since
 from ..models import Agent, Conversation, Message, now_utc
 from .knowledge import build_system_prompt, retrieve_knowledge
-from .leads import lead_context_from_conversation
+from .leads import ensure_whatsapp_contact_lead, lead_context_from_conversation
 from .media import describe_image, transcribe_audio
 from .payment_reviews import attach_payment_receipt
 from .providers import resolve_agent_credentials, resolve_provider_credentials
+from .restaurant import is_restaurant_client
 from .subscriptions import prepare_activation_delivery
 from .tools import run_completion
 from .usage import record_usage
@@ -213,6 +214,19 @@ async def process_inbound(
             conversation_id=conversation.id,
             mode="historical" if inbound.is_historical else "ineligible",
         )
+    lead_context = lead_context_from_conversation(
+        conversation,
+        trusted_sender_jid=inbound.trusted_sender_jid,
+    )
+    restaurant_mode = is_restaurant_client(channel.agent.client)
+    if not restaurant_mode:
+        try:
+            ensure_whatsapp_contact_lead(db, lead_context)
+            db.commit()
+        except Exception:
+            logger.exception("Could not ensure WhatsApp lead for conversation_id=%s", conversation.id)
+            db.rollback()
+
     if conversation.mode == "human":
         return InboundResult(accepted=True, conversation_id=conversation.id, mode="human")
 
@@ -245,10 +259,7 @@ async def process_inbound(
             base_url,
             api_key,
             messages,
-            tool_context=lead_context_from_conversation(
-                conversation,
-                trusted_sender_jid=inbound.trusted_sender_jid,
-            ),
+            tool_context=lead_context,
             temperature=agent.temperature,
             max_tokens=agent.max_tokens,
         )

@@ -68,6 +68,55 @@ def normalize_email(value: str | None) -> str | None:
         raise LeadCaptureError("The email address is not valid") from exc
 
 
+def budget_needs_clarification(industry: str | None, budget: str | None) -> bool:
+    """Flag obviously implausible budgets for industries where a tiny amount is not commercially meaningful.
+
+    This is intentionally conservative: it only applies to real-estate-like clients and
+    only to clearly tiny numeric amounts. It does not infer a realistic budget.
+    """
+    if not budget or not budget.strip():
+        return False
+    industry_plain = " ".join(re.findall(r"[a-z0-9]+", (industry or "").casefold()))
+    real_estate = any(
+        token in industry_plain
+        for token in ("inmobiliaria", "inmobiliario", "real estate", "bienes raices", "realty")
+    )
+    if not real_estate:
+        return False
+
+    value_plain = budget.casefold().strip()
+    if re.search(r"\b(un|uno|una)\s+(sol|soles|dolar|dolares|usd)\b", value_plain):
+        return True
+    if re.search(r"\b(mil|miles|millon|millones)\b", value_plain):
+        return False
+
+    matches = re.findall(r"\d[\d.,]*", value_plain)
+    if not matches:
+        return False
+    digits = re.sub(r"\D", "", matches[0])
+    if not digits:
+        return False
+    return int(digits) < 1000
+
+
+def notes_need_clarification(industry: str | None, notes: str | None) -> bool:
+    """Flag obviously impossible purchase horizons in real-estate qualification notes."""
+    if not notes or not notes.strip():
+        return False
+    industry_plain = " ".join(re.findall(r"[a-z0-9]+", (industry or "").casefold()))
+    real_estate = any(
+        token in industry_plain
+        for token in ("inmobiliaria", "inmobiliario", "real estate", "bienes raices", "realty")
+    )
+    if not real_estate:
+        return False
+    plain = notes.casefold()
+    for raw in re.findall(r"\b(\d{2,})\s*(?:anos|años|year|years)\b", plain):
+        if int(raw) > 50:
+            return True
+    return False
+
+
 def normalize_phone(value: str | None) -> str | None:
     if not value or not value.strip():
         return None
@@ -140,6 +189,60 @@ def trusted_whatsapp_phone(db: Session, context: LeadContext) -> str | None:
     except LeadCaptureError:
         return None
 
+
+def ensure_whatsapp_contact_lead(db: Session, context: LeadContext) -> tuple[Lead | None, bool]:
+    """Create or reuse a lead for a trusted WhatsApp contact and link the conversation.
+
+    Returns (lead, created) so callers can trigger one-time actions only for a
+    genuinely new prospect record.
+    """
+    _validated_conversation(db, context)
+    trusted_phone = trusted_whatsapp_phone(db, context)
+    if not trusted_phone:
+        return None, False
+
+    linked = db.scalar(
+        select(Lead)
+        .join(LeadConversation)
+        .where(
+            LeadConversation.conversation_id == context.conversation_id,
+            Lead.agency_id == context.agency_id,
+            Lead.client_id == context.client_id,
+        )
+    )
+    if linked:
+        return linked, False
+
+    lead = db.scalar(
+        select(Lead).where(
+            Lead.agency_id == context.agency_id,
+            Lead.client_id == context.client_id,
+            Lead.phone_normalized == trusted_phone,
+        )
+    )
+    created = lead is None
+    if created:
+        lead = Lead(
+            agency_id=context.agency_id,
+            client_id=context.client_id,
+            agent_id=context.agent_id,
+            source=context.channel,
+            phone=trusted_phone,
+            phone_normalized=trusted_phone,
+        )
+        db.add(lead)
+        db.flush()
+
+    link = db.scalar(
+        select(LeadConversation).where(LeadConversation.conversation_id == context.conversation_id)
+    )
+    if link is None:
+        db.add(LeadConversation(lead_id=lead.id, conversation_id=context.conversation_id))
+        db.flush()
+    elif link.lead_id != lead.id:
+        raise LeadIdentityConflict("The conversation is already associated with another lead")
+
+    return lead, created
 
 def create_or_update_lead(
     db: Session,

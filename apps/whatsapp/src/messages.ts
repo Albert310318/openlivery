@@ -36,11 +36,16 @@ export function isDirectIncoming(message: WAMessage): boolean {
   );
 }
 
+export function normalizePhoneJid(jid?: string | null): string | null {
+  if (!jid) return null;
+  const match = /^([0-9]{7,15})(?::[0-9]+)?@s\.whatsapp\.net$/.exec(jid);
+  return match ? `${match[1]}@s.whatsapp.net` : null;
+}
+
 export function trustedPhoneJid(message: WAMessage): string | null {
   const remoteJid = message.key.remoteJid;
   if (!remoteJid?.endsWith("@lid")) return null;
-  const alternate = message.key.remoteJidAlt;
-  return alternate && /^[0-9]{7,15}@s\.whatsapp\.net$/.test(alternate) ? alternate : null;
+  return normalizePhoneJid(message.key.remoteJidAlt);
 }
 
 export function directIncomingForUpsert(type: string, messages: WAMessage[]): WAMessage[] {

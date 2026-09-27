@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ...models import Lead, LeadConversation, Message, now_utc
+from ...models import Client, Lead, LeadConversation, Message, now_utc
 from ...models_orders import PaymentNotification, RestaurantOrder
 from ...models_restaurant import RestaurantPaymentMethod
 from ...schemas_leads import LeadCaptureInput, LeadToolInput
@@ -22,6 +22,8 @@ from ..leads import (
 )
 from ..lead_handoffs import LeadHandoffError, notify_sales_advisor
 from ..restaurant_orders import create_order, resolve_whatsapp_items
+from ..calendar import CalendarError, availability, cancel_appointment, create_appointment, reschedule_appointment
+from ..leads import budget_needs_clarification, notes_need_clarification
 
 
 LEAD_CAPTURE_RULES = (
@@ -103,6 +105,176 @@ SALES_ADVISOR_TOOL_SCHEMA = {
     "required": ["consent_evidence"],
     "additionalProperties": False,
 }
+
+CALENDAR_AVAILABILITY_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "date": {"type": "string", "description": "Local date in YYYY-MM-DD."},
+        "part_of_day": {
+            "type": "string",
+            "enum": ["morning", "afternoon", "evening"],
+            "description": "Optional part of day requested by the prospect.",
+        },
+    },
+    "required": ["date"],
+    "additionalProperties": False,
+}
+
+CALENDAR_CREATE_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "start_iso": {
+            "type": "string",
+            "description": "Exact confirmed appointment start in ISO 8601 including timezone offset.",
+        },
+        "confirmation_evidence": {
+            "type": "string",
+            "description": "Exact quote from the prospect's latest message confirming this appointment time.",
+        },
+    },
+    "required": ["start_iso", "confirmation_evidence"],
+    "additionalProperties": False,
+}
+
+CALENDAR_RESCHEDULE_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "start_iso": {
+            "type": "string",
+            "description": "Exact new appointment start in ISO 8601 including timezone offset.",
+        },
+        "confirmation_evidence": {
+            "type": "string",
+            "description": "Exact quote from the prospect's latest message confirming the new appointment time.",
+        },
+    },
+    "required": ["start_iso", "confirmation_evidence"],
+    "additionalProperties": False,
+}
+
+CALENDAR_CANCEL_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "confirmation_evidence": {
+            "type": "string",
+            "description": "Exact quote from the prospect's latest message requesting appointment cancellation.",
+        },
+    },
+    "required": ["confirmation_evidence"],
+    "additionalProperties": False,
+}
+
+CALENDAR_RULES = (
+    "Calendar rules: never invent availability. Use consultar_disponibilidad before offering appointment times. "
+    "Offer only slots returned by the tool. Before crear_cita or reprogramar_cita, require an explicit prospect "
+    "confirmation of one exact offered date and time; pass an exact quote from the latest prospect message as "
+    "confirmation_evidence. Never create or move a booking from an ambiguous answer. Use cancelar_cita only when "
+    "the prospect explicitly asks to cancel. After any successful calendar action, state the exact confirmed local "
+    "date and time returned by the tool. If availability changed, apologize briefly and offer fresh slots."
+)
+
+
+def _latest_user_message(db: Session, context: LeadContext) -> Message | None:
+    return db.scalar(
+        select(Message)
+        .where(Message.conversation_id == context.conversation_id, Message.role == "user")
+        .order_by(Message.created_at.desc(), Message.id.desc())
+        .limit(1)
+    )
+
+
+def _require_latest_user_evidence(db: Session, context: LeadContext, evidence: object) -> str:
+    if not isinstance(evidence, str) or not evidence.strip():
+        raise CalendarError("Exact confirmation evidence from the latest prospect message is required")
+    latest = _latest_user_message(db, context)
+    value = evidence.strip()
+    if not latest or value not in latest.content:
+        raise CalendarError("Calendar confirmation evidence must be quoted from the latest prospect message")
+    return value
+
+
+RESTAURANT_MENU_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "query": {"type": "string", "description": "Optional product/category search text."},
+    },
+    "additionalProperties": False,
+}
+
+RESTAURANT_ADD_ITEM_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "item_name": {"type": "string", "description": "Menu item name as requested by the customer."},
+        "quantity": {"type": "integer", "minimum": 1, "maximum": 99},
+        "notes": {"type": "string", "description": "Only explicit preparation notes from the customer."},
+        "evidence": {"type": "string", "description": "Exact quote from the latest customer message supporting this addition."},
+    },
+    "required": ["item_name", "quantity", "evidence"],
+    "additionalProperties": False,
+}
+
+RESTAURANT_REMOVE_ITEM_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "item_name": {"type": "string"},
+        "quantity": {"type": "integer", "minimum": 1, "maximum": 99},
+        "evidence": {"type": "string", "description": "Exact quote from the latest customer message supporting this change."},
+    },
+    "required": ["item_name", "evidence"],
+    "additionalProperties": False,
+}
+
+RESTAURANT_DETAILS_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "customer_name": {"type": "string"},
+        "fulfillment_type": {"type": "string", "enum": ["delivery", "table", "pickup"]},
+        "table_label": {"type": "string"},
+        "delivery_address": {"type": "string"},
+        "evidence": {"type": "string", "description": "Exact quote from the latest customer message supporting the supplied details."},
+    },
+    "required": ["evidence"],
+    "additionalProperties": False,
+}
+
+RESTAURANT_CONFIRM_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "confirmation_evidence": {
+            "type": "string",
+            "description": "Exact quote from the latest customer message explicitly confirming the complete order.",
+        },
+    },
+    "required": ["confirmation_evidence"],
+    "additionalProperties": False,
+}
+
+RESTAURANT_PAYMENT_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "method": {"type": "string", "description": "Payment method explicitly stated by the customer."},
+        "reference": {"type": "string", "description": "Optional operation/reference explicitly provided by the customer."},
+        "evidence": {
+            "type": "string",
+            "description": "Exact quote from the latest customer message saying payment was made/reported.",
+        },
+    },
+    "required": ["method", "evidence"],
+    "additionalProperties": False,
+}
+
+RESTAURANT_ORDER_RULES = (
+    "Restaurant order rules: act as a waiter, not as a sales-lead qualifier. Never invent menu items, prices, "
+    "discounts or totals. Use consultar_menu for menu/price questions and agregar_item_pedido for each customer "
+    "addition; the server is the only authority for arithmetic and totals. After changes, use ver_pedido when needed "
+    "and present a concise itemized summary. Before confirming the order, make sure delivery mode is known: delivery "
+    "requires an address; table requires a table identifier. Ask only for missing order information. "
+    "Do not mark an order paid merely because the customer says they paid. registrar_pago_reportado means payment "
+    "is awaiting human verification. Never say payment is confirmed or that the order went to kitchen until the "
+    "system status explicitly says so. A restaurant customer is an order/customer, not a CRM sales lead, so do not "
+    "ask for budget or preferred advisor-contact time and do not offer sales-advisor handoff. "
+)
+
 
 SALES_ADVISOR_RULES = (
     "Sales advisor handoff rules: you may offer advisor contact when the prospect shows sufficient commercial "
@@ -480,6 +652,46 @@ async def execute_internal_tool(db: Session, name: str, args: dict, context: Lea
             ), False
         except (LeadCaptureError, ValueError, HTTPException) as exc:
             return f"Error: {getattr(exc, 'detail', str(exc))}", True
+    if name == "consultar_disponibilidad":
+        try:
+            if not isinstance(args, dict):
+                raise CalendarError("Invalid calendar arguments")
+            result = await availability(
+                db,
+                context,
+                date=str(args.get("date") or ""),
+                part_of_day=args.get("part_of_day"),
+            )
+            return json.dumps(result, ensure_ascii=False, separators=(",", ":")), False
+        except (CalendarError, ValueError) as exc:
+            return f"Error: {exc}", True
+    if name == "crear_cita":
+        try:
+            if not isinstance(args, dict):
+                raise CalendarError("Invalid calendar arguments")
+            _require_latest_user_evidence(db, context, args.get("confirmation_evidence"))
+            result = await create_appointment(db, context, start_iso=str(args.get("start_iso") or ""))
+            return json.dumps(result, ensure_ascii=False, separators=(",", ":")), False
+        except (CalendarError, ValueError) as exc:
+            return f"Error: {exc}", True
+    if name == "reprogramar_cita":
+        try:
+            if not isinstance(args, dict):
+                raise CalendarError("Invalid calendar arguments")
+            _require_latest_user_evidence(db, context, args.get("confirmation_evidence"))
+            result = await reschedule_appointment(db, context, start_iso=str(args.get("start_iso") or ""))
+            return json.dumps(result, ensure_ascii=False, separators=(",", ":")), False
+        except (CalendarError, ValueError) as exc:
+            return f"Error: {exc}", True
+    if name == "cancelar_cita":
+        try:
+            if not isinstance(args, dict):
+                raise CalendarError("Invalid calendar arguments")
+            _require_latest_user_evidence(db, context, args.get("confirmation_evidence"))
+            result = await cancel_appointment(db, context)
+            return json.dumps(result, ensure_ascii=False, separators=(",", ":")), False
+        except (CalendarError, ValueError) as exc:
+            return f"Error: {exc}", True
     if name == "notify_sales_advisor":
         try:
             evidence = args.get("consent_evidence") if isinstance(args, dict) else None
@@ -494,6 +706,42 @@ async def execute_internal_tool(db: Session, name: str, args: dict, context: Lea
     try:
         tool_payload = LeadToolInput.model_validate(args)
         _validate_user_evidence(db, context, tool_payload)
+        client = db.scalar(
+            select(Client).where(
+                Client.id == context.client_id,
+                Client.agency_id == context.agency_id,
+            )
+        )
+        if "budget" in tool_payload.model_fields_set and tool_payload.budget is not None:
+            if client and budget_needs_clarification(client.industry, tool_payload.budget):
+                return json.dumps(
+                    {
+                        "ok": False,
+                        "skipped": True,
+                        "reason": "budget_needs_clarification",
+                        "instruction": (
+                            "The stated budget is clearly implausible for this business context. "
+                            "Do not save it as a real budget. Ask one brief clarification question."
+                        ),
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ), False
+        if "notes" in tool_payload.model_fields_set and tool_payload.notes is not None:
+            if client and notes_need_clarification(client.industry, tool_payload.notes):
+                return json.dumps(
+                    {
+                        "ok": False,
+                        "skipped": True,
+                        "reason": "qualification_value_needs_clarification",
+                        "instruction": (
+                            "The stated purchase horizon is clearly implausible. Do not save it as a real "
+                            "qualification fact. Ask one brief clarification question."
+                        ),
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ), False
         payload = LeadCaptureInput.model_validate(tool_payload.model_dump(exclude={"evidence"}))
         result = create_or_update_lead(db, context, payload)
     except LeadIdentityRequired:
