@@ -32,6 +32,10 @@ const en = {
     leads: "Leads",
     channels: "Channels",
     settings: "Settings",
+    orders: "Orders",
+    personal: "Staff",
+    restaurantSetup: "Restaurant setup",
+    reports: "Sales reports",
   },
   shell: {
     loading: "Loading AYV…",
@@ -39,7 +43,6 @@ const en = {
     closeMenu: "Close menu",
     logout: "Log out",
     language: "Language",
-    joinCommunity: "Join the community",
   },
   auth: {
     verifyTitle: "Verify your email",
@@ -131,6 +134,10 @@ const es: typeof en = {
     leads: "Leads",
     channels: "Canales",
     settings: "Configuración",
+    orders: "Pedidos",
+    personal: "Personal",
+    restaurantSetup: "Configuración del restaurante",
+    reports: "Reportes de ventas",
   },
   shell: {
     loading: "Cargando AYV…",
@@ -138,7 +145,6 @@ const es: typeof en = {
     closeMenu: "Cerrar menú",
     logout: "Cerrar sesión",
     language: "Idioma",
-    joinCommunity: "Unirse a la comunidad",
   },
   auth: {
     verifyTitle: "Verifica tu correo",

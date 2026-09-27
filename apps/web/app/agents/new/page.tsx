@@ -13,7 +13,7 @@ import { PROVIDERS, modelsFor, modelOptionsFor, defaultModelFor, estimateTokens 
 import { Combobox } from "@/components/combobox";
 import { TIMEZONES } from "@/lib/timezones";
 import { agentTemplates, localize } from "@/lib/agent-templates";
-import type { Agent, Client } from "@/types";
+import type { Agent, Client, User } from "@/types";
 
 const BROWSER_TZ = (() => {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { return "UTC"; }
@@ -27,6 +27,7 @@ export default function NewAgentPage() {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [clients, setClients] = useState<Client[]>([]);
+  const [isGlobalAdmin, setIsGlobalAdmin] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const [templateId, setTemplateId] = useState("");
@@ -44,9 +45,10 @@ export default function NewAgentPage() {
 
   useEffect(() => {
     const preferred = new URLSearchParams(window.location.search).get("client") || "";
-    accessibleClients().then((c) => {
+    Promise.all([api<User>("/auth/me"), accessibleClients()]).then(([me, c]) => {
+      setIsGlobalAdmin(me.is_vendiq_admin);
       setClients(c);
-      setClientId(preferred || c[0]?.id || "");
+      setClientId((me.is_vendiq_admin ? preferred : "") || c[0]?.id || "");
     }).catch(() => {});
   }, []);
 
@@ -119,7 +121,7 @@ export default function NewAgentPage() {
       {step === 1 && <div className="wizard-fields">
         <div className="wizard-copy"><h2>{t("agents.wizard.identityTitle")}</h2><p>{t("agents.wizard.identitySubtitle")}</p></div>
         <div className="form-grid">
-          <label>{t("agents.new.clientLabel")}<select value={clientId} onChange={(e) => setClientId(e.target.value)}>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+          {isGlobalAdmin ? <label>{t("agents.new.clientLabel")}<select value={clientId} onChange={(e) => setClientId(e.target.value)}>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label> : <div className="field-block"><span className="field-label">{t("agents.new.clientLabel")}</span><strong>{clients[0]?.name || "—"}</strong></div>}
           <label>{t("agents.new.nameLabel")}<input value={name} onChange={(e) => setName(e.target.value)} required autoFocus placeholder={t("agents.new.namePlaceholder")} /></label>
         </div>
         <label>{t("agents.new.descriptionLabel")}<textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder={t("agents.new.descriptionPlaceholder")} /></label>

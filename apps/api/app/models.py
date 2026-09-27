@@ -50,6 +50,7 @@ class User(Base):
     agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(160))
     email: Mapped[str] = mapped_column(String(320), index=True)
+    phone: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(30), default="admin")
     is_vendiq_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
@@ -60,6 +61,7 @@ class User(Base):
     password_recovery_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     password_recovery_send_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     password_recovery_credentials_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    email_verification_pending: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
     agency: Mapped[Agency] = relationship(back_populates="users")
@@ -387,9 +389,17 @@ class Message(Base):
     sender_type: Mapped[str] = mapped_column(String(30), default="visitor")
     sender_name: Mapped[str | None] = mapped_column(String(180), nullable=True)
     external_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    media_kind: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    media_mime: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    media_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    media_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
+
+    @property
+    def media_url(self) -> str | None:
+        return f"/api/conversations/{self.conversation_id}/messages/{self.id}/media" if self.media_data else None
 
 
 class Lead(Base):
@@ -570,3 +580,5 @@ from . import models_promotions  # noqa: E402, F401
 
 # Register transport evidence metadata only; no activation hooks.
 from . import models_subscription_activation  # noqa: E402, F401
+from . import models_restaurant  # noqa: E402, F401
+from . import models_orders  # noqa: E402, F401

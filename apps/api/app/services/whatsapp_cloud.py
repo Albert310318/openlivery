@@ -70,6 +70,35 @@ async def send_text(access_token: str, phone_number_id: str, to: str, body: str)
         return None
 
 
+async def send_image(access_token: str, phone_number_id: str, to: str, data: bytes, mime_type: str, caption: str | None = None) -> str | None:
+    """Upload and send an image as real WhatsApp Cloud media."""
+    upload = await _graph_request(
+        "POST", _graph_url(f"{phone_number_id}/media"), access_token,
+        data={"messaging_product": "whatsapp", "type": mime_type},
+        files={"file": ("welcome-flyer", data, mime_type)},
+    )
+    if upload.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"WhatsApp could not upload the image: {_graph_error(upload)}")
+    try:
+        media_id = upload.json()["id"]
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=502, detail="WhatsApp returned an invalid media response.") from exc
+    image = {"id": media_id}
+    if caption:
+        image["caption"] = caption[:1024]
+    response = await _graph_request(
+        "POST", _graph_url(f"{phone_number_id}/messages"), access_token,
+        json={"messaging_product": "whatsapp", "to": to, "type": "image", "image": image},
+    )
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"WhatsApp could not send the image: {_graph_error(response)}")
+    try:
+        messages = response.json().get("messages") or []
+        return messages[0].get("id") if messages else None
+    except ValueError:
+        return None
+
+
 async def fetch_media(access_token: str, media_id: str) -> tuple[bytes, str]:
     """Download an inbound media file: resolve the short-lived URL, then fetch
     it with the same token. Returns (data, mime_type)."""

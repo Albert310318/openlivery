@@ -6,7 +6,7 @@ from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from ..models import Conversation, Lead, LeadConversation, WhatsAppChannel, WhatsAppCloudChannel, now_utc
+from ..models import Client, Conversation, Lead, LeadConversation, WhatsAppChannel, WhatsAppCloudChannel, now_utc
 from ..schemas_leads import LeadCaptureInput
 
 
@@ -96,6 +96,11 @@ def _validated_conversation(db: Session, context: LeadContext) -> Conversation:
     return conversation
 
 
+def validate_lead_context(db: Session, context: LeadContext) -> Conversation:
+    """Validate the complete tenant/agent/conversation identity before a tool writes."""
+    return _validated_conversation(db, context)
+
+
 def trusted_whatsapp_phone(db: Session, context: LeadContext) -> str | None:
     """Return the authenticated channel sender without treating it as model evidence."""
     conversation = _validated_conversation(db, context)
@@ -142,6 +147,10 @@ def create_or_update_lead(
     payload: LeadCaptureInput,
 ) -> LeadCaptureResult:
     _validated_conversation(db, context)
+    is_restaurant = db.scalar(
+        select(Client.industry).where(Client.id == context.client_id)
+    )
+    is_restaurant = (is_restaurant or "").strip().casefold() == "restaurante"
     supplied = {name for name in _LEAD_FIELDS if name in payload.model_fields_set and getattr(payload, name) is not None}
     if not supplied:
         raise LeadCaptureError("At least one explicitly provided lead field is required")
@@ -187,8 +196,26 @@ def create_or_update_lead(
     if len(matched_ids) > 1:
         raise LeadIdentityConflict("The provided phone and email belong to different lead records")
     identity_lead = matches[0] if matches else None
-    if linked and identity_lead and linked.id != identity_lead.id:
+    linked_identity_conflict = bool(
+        linked
+        and (
+            (phone_normalized and linked.phone_normalized != phone_normalized)
+            or (email_normalized and linked.email_normalized != email_normalized)
+        )
+    )
+    if linked and identity_lead and linked.id != identity_lead.id and not is_restaurant:
         raise LeadIdentityConflict("The conversation and contact details point to different lead records")
+
+    # Restaurant conversations are order conversations and can outlive a
+    # contact identity (for example, a reused playground conversation).  Do
+    # not merge the old lead into the new contact and do not discard either
+    # record: move only this conversation's link to the identity-matched lead.
+    if is_restaurant and linked and (linked_identity_conflict or (identity_lead and linked.id != identity_lead.id)):
+        link = db.scalar(select(LeadConversation).where(LeadConversation.conversation_id == context.conversation_id))
+        if link:
+            db.delete(link)
+        db.flush()
+        linked = None
 
     lead = linked or identity_lead
     created = lead is None

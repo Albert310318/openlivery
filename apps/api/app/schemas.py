@@ -32,6 +32,7 @@ class PortalVerificationPending(BaseModel):
     status: Literal["verification_required"] = "verification_required"
     masked_email: str
     retry_after: int
+    verification_type: Literal["user"] | None = None
 
 
 class PortalVerificationConfirm(BaseModel):
@@ -68,6 +69,10 @@ class UserOut(ORMModel):
     role: str
     is_vendiq_admin: bool
     agency: AgencyOut
+    restaurant_role: str | None = None
+    restaurant_client_id: uuid.UUID | None = None
+    restaurant_client_name: str | None = None
+    email_verification_pending: bool = False
 
 
 class ClientBase(BaseModel):
@@ -328,6 +333,10 @@ class MessageOut(ORMModel):
     sender_type: str
     sender_name: str | None
     external_message_id: str | None = None
+    media_kind: str | None = None
+    media_mime: str | None = None
+    media_filename: str | None = None
+    media_url: str | None = None
     created_at: datetime
 
 
@@ -512,12 +521,16 @@ class WidgetMessageIn(BaseModel):
 class WidgetMessageOut(BaseModel):
     role: str
     content: str
+    media_url: str | None = None
+    media_filename: str | None = None
 
 
 class WidgetReply(BaseModel):
     mode: str
     reply: str | None = None
     messages: list[WidgetMessageOut] = []
+    media_url: str | None = None
+    media_filename: str | None = None
 
 
 class WhatsAppInbound(BaseModel):
@@ -542,6 +555,10 @@ class WhatsAppInboundResult(BaseModel):
     mode: str | None = None
     outbound_message_id: uuid.UUID | None = None
     delivery_id: uuid.UUID | None = None
+    welcome_flyer_message_id: uuid.UUID | None = None
+    welcome_flyer_data: str | None = None
+    welcome_flyer_mime: str | None = None
+    welcome_flyer_caption: str | None = None
 
 
 class WhatsAppOutboundConfirm(BaseModel):

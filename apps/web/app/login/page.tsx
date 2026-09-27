@@ -9,6 +9,7 @@ import { useT } from "@/lib/i18n";
 import { PortalEmailVerification, type VerificationPending } from "@/components/portal-email-verification";
 import { Alert } from "@/components/ui";
 import { BrandLogo } from "@/components/brand";
+import { restaurantAwareRedirect } from "@/lib/auth-navigation";
 
 type LoginResult = { principal_type: "admin" | "portal"; redirect_to: string };
 
@@ -34,7 +35,8 @@ export default function LoginPage() {
     try {
       const result = await api<LoginResult | VerificationPending>("/auth/unified-login", { method: "POST", body: JSON.stringify(data) });
       if ("redirect_to" in result) {
-        router.push(result.redirect_to);
+        const destination = result.principal_type === "admin" ? await restaurantAwareRedirect(result.redirect_to) : result.redirect_to;
+        router.replace(destination);
         router.refresh();
       } else {
         setPending(result);
@@ -68,7 +70,7 @@ export default function LoginPage() {
           </div>
         </section>
         <section className="access-form-wrap">
-          {pending ? <PortalEmailVerification pending={pending} onBack={() => setPending(null)} /> : <div className="access-card">
+          {pending ? <PortalEmailVerification pending={pending} verificationType={pending.verification_type === "user" ? "user" : "portal"} onBack={() => setPending(null)} /> : <div className="access-card">
             <span className="access-card-label"><ShieldCheck size={15} /> {t("auth.cardLabel")}</span>
             <h2>{t("auth.cardTitleLogin")}</h2>
             <p>{t("auth.cardSubtitleLogin")}</p>

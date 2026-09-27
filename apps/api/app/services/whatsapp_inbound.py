@@ -20,10 +20,12 @@ from ..models import Agent, Conversation, Message, now_utc
 from .knowledge import build_system_prompt, retrieve_knowledge
 from .leads import lead_context_from_conversation
 from .media import describe_image, transcribe_audio
+from .payment_reviews import attach_payment_receipt
 from .providers import resolve_agent_credentials, resolve_provider_credentials
 from .subscriptions import prepare_activation_delivery
 from .tools import run_completion
 from .usage import record_usage
+from .welcome_flyer import create_welcome_flyer_message, flyer_transport_payload
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,10 @@ class InboundResult:
     mode: str | None = None
     outbound_message_id: uuid.UUID | None = None
     delivery_id: uuid.UUID | None = None
+    welcome_flyer_message_id: uuid.UUID | None = None
+    welcome_flyer_data: str | None = None
+    welcome_flyer_mime: str | None = None
+    welcome_flyer_caption: str | None = None
 
 
 LUCIA_NEW_SESSION_AFTER = timedelta(hours=12)
@@ -156,6 +162,7 @@ async def process_inbound(
             Conversation.external_chat_id == inbound.external_chat_id,
         )
     )
+    is_new_conversation = conversation is None
     new_lucia_session = _starts_new_lucia_session(conversation, channel.agent, received_at)
     if not conversation:
         title = (inbound.sender_name or inbound.external_chat_id.split("@")[0])[:240]
@@ -175,6 +182,14 @@ async def process_inbound(
         conversation.contact_name = inbound.sender_name
 
     content = await _inbound_content(db, channel.agent, inbound)
+    if inbound.media_kind == "image" and inbound.media_bytes:
+        attach_payment_receipt(
+            db,
+            conversation_id=conversation.id,
+            data=inbound.media_bytes,
+            filename="whatsapp-comprobante",
+            mime=inbound.media_mime or "image/jpeg",
+        )
     visitor_message = Message(
         conversation_id=conversation.id,
         role="user",
@@ -219,7 +234,7 @@ async def process_inbound(
     ).all()
     history = list(reversed(history))
     messages = [
-        {"role": "system", "content": build_system_prompt(agent, knowledge.text)},
+        {"role": "system", "content": build_system_prompt(agent, knowledge.text, db)},
         *[{"role": item.role, "content": item.content} for item in history],
     ]
     base_url, api_key = credentials
@@ -261,6 +276,7 @@ async def process_inbound(
     conversation.updated_at = now_utc()
     channel.last_error = None
     db.add(outbound)
+    flyer_message = create_welcome_flyer_message(db, conversation, only_new=is_new_conversation)
     delivery_id = None
     if activation_channel == "whatsapp_qr":
         # The assistant message and its PREPARED evidence must become visible
@@ -279,6 +295,7 @@ async def process_inbound(
         db.flush()
         delivery_id = delivery.id
     db.commit()
+    flyer_payload = flyer_transport_payload(flyer_message) if flyer_message and conversation_channel.startswith("whatsapp") else None
     return InboundResult(
         accepted=True,
         reply=reply_text,
@@ -286,4 +303,8 @@ async def process_inbound(
         mode="ai",
         outbound_message_id=outbound.id,
         delivery_id=delivery_id,
+        welcome_flyer_message_id=flyer_payload["message_id"] if flyer_payload else None,
+        welcome_flyer_data=flyer_payload["data"] if flyer_payload else None,
+        welcome_flyer_mime=flyer_payload["mime"] if flyer_payload else None,
+        welcome_flyer_caption=flyer_payload["caption"] if flyer_payload else None,
     )

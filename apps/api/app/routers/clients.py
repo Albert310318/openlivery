@@ -48,6 +48,15 @@ def _require_vendiq_admin(user: User) -> None:
 
 
 def _current_client(db: Session, user: User) -> Client | None:
+    assigned_id = getattr(user, "restaurant_client_id", None)
+    if assigned_id:
+        assigned = db.scalar(
+            select(Client)
+            .options(selectinload(Client.agents))
+            .where(Client.id == assigned_id, Client.agency_id == user.agency_id)
+        )
+        if assigned:
+            return assigned
     return db.scalar(
         select(Client)
         .options(selectinload(Client.agents))

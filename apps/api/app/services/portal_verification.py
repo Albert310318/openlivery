@@ -21,6 +21,7 @@ PASSWORD_RESET_TOKEN_TYPE = "password_reset"
 PASSWORD_RESET_VERIFIED_TOKEN_TYPE = "password_reset_verified"
 USER_PASSWORD_RESET_TOKEN_TYPE = "user_password_reset"
 USER_PASSWORD_RESET_VERIFIED_TOKEN_TYPE = "user_password_reset_verified"
+USER_EMAIL_VERIFICATION_TOKEN_TYPE = "user_email_verification"
 
 
 def _retry_after(last_sent_at, window_started_at, send_count: int) -> int:
@@ -102,7 +103,7 @@ def recovery_user(db: Session, email: str) -> User | None:
     return user
 
 
-def issue_user_code(db: Session, user: User) -> None:
+def issue_user_code(db: Session, user: User, *, allow_delivery_failure: bool = False) -> bool:
     wait = retry_after_user(user)
     if wait:
         raise HTTPException(429, "Límite de envíos alcanzado. Espera antes de reenviar.", headers={"Retry-After": str(wait)})
@@ -128,8 +129,11 @@ def issue_user_code(db: Session, user: User) -> None:
         user.password_recovery_code_hash = None
         user.password_recovery_expires_at = None
         db.commit()
+        if allow_delivery_failure:
+            return False
         raise HTTPException(503, "No se pudo enviar el código; vuelve a intentar más tarde.") from None
     db.commit()
+    return True
 
 
 def recovery_client(db: Session, email: str) -> Client | None:
@@ -184,6 +188,14 @@ def pending_user_session(response: Response, user: User, token_type: str = USER_
         path="/api",
     )
     response.delete_cookie("portal_access_token", path="/")
+    if token_type == USER_EMAIL_VERIFICATION_TOKEN_TYPE:
+        local, domain = user.email.rsplit("@", 1)
+        return {
+            "status": "verification_required",
+            "masked_email": f"{local[0]}***@{domain}",
+            "retry_after": retry_after_user(user),
+            "verification_type": "user",
+        }
     return {"message": "Si el correo está registrado, recibirás un código de recuperación."}
 
 
@@ -237,7 +249,7 @@ def verification_user(db: Session, token: str | None) -> User:
             options={"require": ["exp", "sub", "agency_id", "version", "type"]},
         )
         token_type = payload["type"]
-        if token_type not in {USER_PASSWORD_RESET_TOKEN_TYPE, USER_PASSWORD_RESET_VERIFIED_TOKEN_TYPE}:
+        if token_type not in {USER_PASSWORD_RESET_TOKEN_TYPE, USER_PASSWORD_RESET_VERIFIED_TOKEN_TYPE, USER_EMAIL_VERIFICATION_TOKEN_TYPE}:
             raise ValueError()
         user_id = uuid.UUID(payload["sub"])
         agency_id = uuid.UUID(payload["agency_id"])
@@ -248,6 +260,7 @@ def verification_user(db: Session, token: str | None) -> User:
         select(User).where(User.id == user_id, User.agency_id == agency_id).with_for_update()
     )
     is_unverified_reset = token_type == USER_PASSWORD_RESET_TOKEN_TYPE
+    is_email_verification = token_type == USER_EMAIL_VERIFICATION_TOKEN_TYPE
     if (
         not user
         or payload.get("version") != user.password_recovery_credentials_version
@@ -255,6 +268,7 @@ def verification_user(db: Session, token: str | None) -> User:
             is_unverified_reset
             and (not user.password_recovery_code_hash or not user.password_recovery_expires_at)
         )
+        or (is_email_verification and (not user.email_verification_pending or not user.password_recovery_code_hash or not user.password_recovery_expires_at))
     ):
         raise HTTPException(401, "La sesión de recuperación no es válida.")
     return user
@@ -296,6 +310,14 @@ def is_user_password_reset_verified_token(token: str | None) -> bool:
     try:
         payload = jwt.decode(token or "", get_settings().secret_key, algorithms=["HS256"])
         return payload.get("type") == USER_PASSWORD_RESET_VERIFIED_TOKEN_TYPE
+    except jwt.PyJWTError:
+        return False
+
+
+def is_user_email_verification_token(token: str | None) -> bool:
+    try:
+        payload = jwt.decode(token or "", get_settings().secret_key, algorithms=["HS256"])
+        return payload.get("type") == USER_EMAIL_VERIFICATION_TOKEN_TYPE
     except jwt.PyJWTError:
         return False
 

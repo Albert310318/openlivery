@@ -1,14 +1,27 @@
 import json
+import hashlib
 import re
 import unicodedata
+from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import select
+from fastapi import HTTPException
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ...models import Lead, LeadConversation, Message
+from ...models import Lead, LeadConversation, Message, now_utc
+from ...models_orders import PaymentNotification, RestaurantOrder
+from ...models_restaurant import RestaurantPaymentMethod
 from ...schemas_leads import LeadCaptureInput, LeadToolInput
-from ..leads import LeadCaptureError, LeadContext, LeadIdentityRequired, create_or_update_lead
+from ..leads import (
+    LeadCaptureError,
+    LeadContext,
+    LeadIdentityRequired,
+    create_or_update_lead,
+    trusted_whatsapp_phone,
+    validate_lead_context,
+)
 from ..lead_handoffs import LeadHandoffError, notify_sales_advisor
+from ..restaurant_orders import create_order, resolve_whatsapp_items
 
 
 LEAD_CAPTURE_RULES = (
@@ -101,6 +114,62 @@ SALES_ADVISOR_RULES = (
     "summary. If the current turn also contains new lead data, call create_or_update_lead first. Never claim that "
     "the advisor was notified unless the tool returns ok=true."
 )
+
+RESTAURANT_ORDER_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "modality": {"type": "string", "enum": ["dine_in", "pickup", "delivery"]},
+        "customer_name": {"type": "string"},
+        "customer_phone": {"type": "string"},
+        "address": {"type": "string"},
+        "address_reference": {"type": "string"},
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "product_name": {"type": "string"},
+                    "quantity": {"type": "integer", "minimum": 1},
+                    "variant_names": {"type": "array", "items": {"type": "string"}},
+                    "extra_names": {"type": "array", "items": {"type": "string"}},
+                    "observations": {"type": "string"},
+                },
+                "required": ["product_name", "quantity"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["modality", "items"],
+    "additionalProperties": False,
+}
+
+RESTAURANT_ORDER_RULES = (
+    "Restaurant order rules: only call create_restaurant_order after the customer explicitly confirms the complete order. "
+    "Use only product, variant, extra, modality and configured payment data present in the structured restaurant context. The configured payment number is the destination/receptor; the customer's origin bank or wallet is irrelevant and must not cause rejection. "
+    "Never invent prices or availability. For delivery first collect name, phone, exact address, reference and any pending variants. "
+    "For dine_in do not ask for an address. A digital payment or receipt never confirms payment automatically; the tool returns pending manual confirmation. "
+    "After create_restaurant_order returns a pending_payment order, that tool call is not the end of the conversation: the very next response MUST say that the order is registered and pending payment, give the exact total, give the configured Datos para pagos (número para pagos and titular, plus instructions when present), request the abono and request the comprobante after paying. Never say the order is ready, that the customer can pick it up, or that the restaurant is waiting for them while payment_status is pending. "
+    "If the customer says ok, thanks, or otherwise tries to close while a restaurant order is pending payment, do not say goodbye; remind them naturally that the abono and verification are still missing. "
+    "When the customer reports a payment operation and amount, call report_restaurant_payment only with those explicit values. A voucher never confirms payment: the tool records the evidence and moves the order to manual payment review. Tell the customer that an administrator must review it. "
+    "For delivery, charge only the product subtotal and tell the customer that delivery is not included and will be coordinated directly by the delivery staff. "
+    "The tool result is the only confirmation that the order was created."
+)
+
+RESTAURANT_PAYMENT_REPORT_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "operation_id": {"type": "string", "minLength": 1, "maxLength": 180},
+        "amount": {"type": "number", "exclusiveMinimum": 0},
+    },
+    "required": ["operation_id", "amount"],
+    "additionalProperties": False,
+}
+
+_RESTAURANT_ORDER_CHANNELS = {"playground", "whatsapp", "whatsapp_cloud"}
+_RESTAURANT_ORDER_ARGUMENTS = {
+    "modality", "customer_name", "customer_phone", "address", "address_reference",
+    "delivery_zone", "items", "payment_method",  # accepted only for old callers; ignored
+}
 
 
 _DATA_FIELDS = ("name", "phone", "email", "interest", "budget", "preferred_contact_time", "notes")
@@ -212,7 +281,205 @@ def enforce_lead_confirmation(text: str, tool_calls: list[dict]) -> str:
     return text
 
 
+def _configured_payment_details(db: Session, client_id) -> dict | None:
+    """Read the single customer-facing payment destination.
+
+    The database still has the old payment-method table for compatibility with
+    the onboarding API and historical orders.  The agent must never select a
+    method from it: this helper only reads the active row containing the
+    restaurant's canonical ``Datos para pagos``.  Existing installations may
+    identify that row as ``other`` or by its display name.
+    """
+
+    rows = db.scalars(
+        select(RestaurantPaymentMethod)
+        .where(RestaurantPaymentMethod.client_id == client_id, RestaurantPaymentMethod.is_active.is_(True))
+        .order_by(RestaurantPaymentMethod.updated_at.desc(), RestaurantPaymentMethod.created_at.desc())
+    ).all()
+    if not rows:
+        return None
+    payment = next(
+        (
+            row for row in rows
+            if (row.display_name or "").strip().casefold() == "datos para pagos"
+            or row.method == "other"
+        ),
+        rows[0],
+    )
+    return {
+        "number": (payment.account_number or "").strip(),
+        "holder": (payment.account_name or "").strip(),
+        "instructions": (payment.instructions or "").strip(),
+        "receipt_required": bool(payment.receipt_required),
+    }
+
+
+def pending_restaurant_payment_message(
+    db: Session,
+    context: LeadContext,
+    *,
+    verification_failed: bool = False,
+) -> str | None:
+    """Build the mandatory customer continuation for an unpaid order."""
+
+    order = db.scalar(
+        select(RestaurantOrder)
+        .where(
+            RestaurantOrder.client_id == context.client_id,
+            RestaurantOrder.conversation_id == context.conversation_id,
+            RestaurantOrder.source == "whatsapp",
+            RestaurantOrder.order_status == "pending_payment",
+            RestaurantOrder.payment_status == "pending",
+        )
+        .order_by(RestaurantOrder.created_at.desc())
+    )
+    if order is None:
+        return None
+    payment = _configured_payment_details(db, context.client_id)
+    total = Decimal(order.total).quantize(Decimal("0.01"))
+    lines = [
+        f"Tu pedido {order.order_number} está registrado y pendiente de pago.",
+        f"Total exacto: S/ {total:.2f}.",
+    ]
+    if payment and payment["number"]:
+        lines.append(f"Número para pagos: {payment['number']}.")
+        if payment["holder"]:
+            lines.append(f"Titular: {payment['holder']}.")
+        if payment["instructions"]:
+            lines.append(f"Instrucciones: {payment['instructions']}")
+        lines.append("Realiza el abono por el total indicado y envíame el comprobante después del pago.")
+    else:
+        lines.append("El restaurante aún no tiene configurado un número para pagos visible para este pedido.")
+        lines.append("Cuando realices el abono, envíame el comprobante para poder verificarlo.")
+    if verification_failed:
+        lines.append("Recibí el comprobante y los datos del pago; el pedido quedó en revisión manual y un administrador debe confirmar el abono.")
+    else:
+        lines.append("El pedido no estará listo para recoger hasta que un administrador confirme manualmente el pago.")
+    return " ".join(lines)
+
+
 async def execute_internal_tool(db: Session, name: str, args: dict, context: LeadContext) -> tuple[str, bool]:
+    if name == "create_restaurant_order":
+        try:
+            # Playground and WhatsApp both use the same tenant-scoped conversation
+            # context. The conversation channel is the origin; it is not a
+            # reason to reject an otherwise valid restaurant order.
+            validate_lead_context(db, context)
+            if (
+                context.channel not in _RESTAURANT_ORDER_CHANNELS
+                or not isinstance(args, dict)
+                or set(args) - _RESTAURANT_ORDER_ARGUMENTS
+                or not {"modality", "items"}.issubset(args)
+            ):
+                raise ValueError("Invalid restaurant order context")
+            items = args.get("items")
+            if not isinstance(items, list) or not items:
+                raise ValueError("At least one item is required")
+            # A legacy payment_method must not change idempotency identity and
+            # create a second copy of the same conversational order.
+            idempotency_args = {key: value for key, value in args.items() if key != "payment_method"}
+            normalized = json.dumps(idempotency_args, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+            namespace = "whatsapp" if context.channel in {"whatsapp", "whatsapp_cloud"} else context.channel
+            key = f"{namespace}:{context.conversation_id}:{hashlib.sha256(normalized.encode()).hexdigest()}"
+            phone = args.get("customer_phone") or trusted_whatsapp_phone(db, context)
+            order_items = resolve_whatsapp_items(db, context.client_id, items)
+            order = create_order(
+                db,
+                client_id=context.client_id,
+                # Keep the existing operational source so pending-payment
+                # visibility and payment verification continue to use the
+                # established conversational-order path. The true channel
+                # remains on Conversation.channel.
+                source="whatsapp",
+                modality=args["modality"],
+                items=order_items,
+                customer_name=args.get("customer_name"),
+                customer_phone=phone,
+                address=args.get("address"),
+                address_reference=args.get("address_reference"),
+                # ``delivery_zone`` is accepted only for old serialized tool
+                # calls; it is deliberately ignored for new orders.
+                delivery_zone_name=None,
+                # Legacy callers may still include payment_method.  It is
+                # intentionally ignored: customer payments use the single
+                # configured destination number.
+                payment_method=None,
+                conversation_id=context.conversation_id,
+                idempotency_key=key,
+            )
+            return json.dumps({"ok": True, "order_number": order.order_number, "status": order.order_status, "payment_status": order.payment_status, "subtotal": str(order.subtotal), "total": str(order.total), "delivery_fee": str(order.delivery_fee), "amount_due_for_products": str(order.subtotal), "payment_details": _configured_payment_details(db, context.client_id)}, separators=(",", ":")), False
+        except (LeadCaptureError, ValueError, HTTPException) as exc:
+            return f"Error: {getattr(exc, 'detail', str(exc))}", True
+    if name == "report_restaurant_payment":
+        try:
+            validate_lead_context(db, context)
+            if not isinstance(args, dict) or set(args) != {"operation_id", "amount"}:
+                raise ValueError("The payment operation and amount are required")
+            operation_id = str(args["operation_id"]).strip()
+            if not operation_id or len(operation_id) > 180:
+                raise ValueError("Invalid payment operation")
+            try:
+                amount = Decimal(str(args["amount"]))
+            except (InvalidOperation, TypeError, ValueError) as exc:
+                raise ValueError("Invalid payment amount") from exc
+            if amount <= 0:
+                raise ValueError("Invalid payment amount")
+            pending_orders = db.scalars(
+                select(RestaurantOrder)
+                .where(
+                    RestaurantOrder.client_id == context.client_id,
+                    RestaurantOrder.conversation_id == context.conversation_id,
+                    RestaurantOrder.source == "whatsapp",
+                    RestaurantOrder.order_status == "pending_payment",
+                    RestaurantOrder.payment_status == "pending",
+                )
+                .order_by(RestaurantOrder.created_at.desc())
+            ).all()
+            if not pending_orders:
+                raise ValueError("There is no pending restaurant order for this conversation")
+            matching_amount = [order for order in pending_orders if Decimal(order.subtotal) == amount]
+            if len(pending_orders) == 1:
+                order = pending_orders[0]
+            elif len(matching_amount) == 1:
+                order = matching_amount[0]
+            else:
+                raise ValueError("The payment report does not identify one pending restaurant order")
+            used_operation = db.scalar(
+                select(RestaurantOrder.id).where(
+                    RestaurantOrder.client_id == context.client_id,
+                    RestaurantOrder.id != order.id,
+                    func.lower(func.btrim(RestaurantOrder.payment_reference)) == operation_id.casefold(),
+                )
+            )
+            used_notification = db.scalar(
+                select(PaymentNotification.id).where(
+                    PaymentNotification.client_id == context.client_id,
+                    func.lower(func.btrim(PaymentNotification.external_operation_id)) == operation_id.casefold(),
+                )
+            )
+            if used_operation or used_notification:
+                raise ValueError("This payment operation has already been used")
+            order.payment_reference = operation_id
+            order.reported_payment_amount = amount
+            order.receipt_submitted = True
+            order.payment_reported_at = order.payment_reported_at or now_utc()
+            order.payment_review_status = "review"
+            order.payment_rejection_reason = None
+            db.commit()
+            return json.dumps(
+                {
+                    "ok": True,
+                    "order_number": order.order_number,
+                    "status": order.order_status,
+                    "payment_status": order.payment_status,
+                    "payment_review_status": order.payment_review_status,
+                    "reported_operation_id": operation_id,
+                    "reported_amount": str(amount),
+                },
+                separators=(",", ":"),
+            ), False
+        except (LeadCaptureError, ValueError, HTTPException) as exc:
+            return f"Error: {getattr(exc, 'detail', str(exc))}", True
     if name == "notify_sales_advisor":
         try:
             evidence = args.get("consent_evidence") if isinstance(args, dict) else None

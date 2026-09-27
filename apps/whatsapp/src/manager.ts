@@ -33,6 +33,10 @@ type InboundResult = {
   reply?: string | null;
   outbound_message_id?: string | null;
   delivery_id?: string | null;
+  welcome_flyer_message_id?: string | null;
+  welcome_flyer_data?: string | null;
+  welcome_flyer_mime?: string | null;
+  welcome_flyer_caption?: string | null;
 };
 
 const logger = pino({ level: process.env.WHATSAPP_LOG_LEVEL || "silent" });
@@ -130,6 +134,18 @@ async function processIncoming(channelId: string, socket: WASocket, message: WAM
           external_message_id: sent.key.id,
           accepted_at: acceptedAt,
         }),
+      });
+    }
+    if (result.welcome_flyer_data && result.welcome_flyer_message_id) {
+      const flyer = await socket.sendMessage(remoteJid, {
+        image: Buffer.from(result.welcome_flyer_data, "base64"),
+        mimetype: result.welcome_flyer_mime || "image/jpeg",
+        caption: result.welcome_flyer_caption || undefined,
+      });
+      if (!flyer?.key.id) throw new Error("WhatsApp did not confirm the welcome flyer send");
+      await backend(`/channels/${channelId}/outbound-confirm`, {
+        method: "POST",
+        body: JSON.stringify({ message_id: result.welcome_flyer_message_id, external_message_id: flyer.key.id }),
       });
     }
   } catch (error) {

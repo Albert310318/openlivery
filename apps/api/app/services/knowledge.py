@@ -4,9 +4,17 @@ from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from ..models import Agent, KnowledgeChunk, KnowledgeDocument
+from ..models_restaurant import (
+    MenuCategory,
+    MenuProduct,
+    RestaurantModality,
+    RestaurantPaymentMethod,
+    RestaurantProfile,
+    RestaurantStaff,
+)
 from .embeddings import cosine_similarity, embed_query, embed_texts
 from .providers import resolve_provider_credentials
 
@@ -186,7 +194,173 @@ def _business_brief(agent: Agent) -> str:
     return "\n".join(lines)
 
 
-def build_system_prompt(agent: Agent, knowledge_text: str) -> str:
+def _is_restaurant_agent(agent: Agent) -> bool:
+    industry = (agent.client.industry or "").strip().casefold()
+    return industry == "restaurante"
+
+
+def _normalized_payment_value(value: str) -> str:
+    return " ".join(value.strip().casefold().split())
+
+
+def _grouped_payment_methods(payments: list[RestaurantPaymentMethod]) -> list[dict]:
+    groups: dict[str, dict] = {}
+    for payment in payments:
+        account_number = (payment.account_number or "").strip()
+        account_key = _normalized_payment_value(account_number)
+        # A missing account cannot safely be merged with another payment.
+        group_key = f"account:{account_key}" if account_key else f"payment:{payment.id or id(payment)}"
+        group = groups.setdefault(
+            group_key,
+            {
+                "account_number": account_number,
+                "account_names": {},
+                "instructions": {},
+                "receipt_required": False,
+            },
+        )
+        account_name = (payment.account_name or "").strip()
+        account_name_key = _normalized_payment_value(account_name)
+        if account_name_key and account_name_key not in group["account_names"]:
+            group["account_names"][account_name_key] = account_name
+        instructions = (payment.instructions or "").strip()
+        instructions_key = _normalized_payment_value(instructions)
+        if instructions_key and instructions_key not in group["instructions"]:
+            group["instructions"][instructions_key] = instructions
+        group["receipt_required"] = group["receipt_required"] or payment.receipt_required
+    return list(groups.values())
+
+
+def _canonical_payment_method(payments: list[RestaurantPaymentMethod]) -> RestaurantPaymentMethod | None:
+    """Return the one customer-facing payment destination.
+
+    Legacy rows remain in the database for historical orders, but the agent
+    must expose only the canonical ``Datos para pagos`` destination.
+    """
+    return next(
+        (
+            row for row in payments
+            if (row.display_name or "").strip().casefold() == "datos para pagos"
+            or row.method == "other"
+        ),
+        payments[0] if payments else None,
+    )
+
+
+def _restaurant_operational_context(db: Session, agent: Agent) -> str:
+    client_id = agent.client_id
+    profile = db.scalar(select(RestaurantProfile).where(RestaurantProfile.client_id == client_id))
+    categories = db.scalars(
+        select(MenuCategory)
+        .options(selectinload(MenuCategory.products).selectinload(MenuProduct.variants), selectinload(MenuCategory.products).selectinload(MenuProduct.extras))
+        .where(MenuCategory.client_id == client_id, MenuCategory.is_active.is_(True))
+        .order_by(MenuCategory.position, MenuCategory.created_at)
+    ).unique().all()
+    modalities = db.scalar(select(RestaurantModality).where(RestaurantModality.client_id == client_id))
+    payment_rows = db.scalars(
+        select(RestaurantPaymentMethod)
+        .where(RestaurantPaymentMethod.client_id == client_id, RestaurantPaymentMethod.is_active.is_(True))
+        .order_by(RestaurantPaymentMethod.created_at)
+    ).all()
+    canonical_payment = _canonical_payment_method(payment_rows)
+    payments = [canonical_payment] if canonical_payment else []
+    staff = db.scalars(
+        select(RestaurantStaff).where(RestaurantStaff.client_id == client_id, RestaurantStaff.is_active.is_(True))
+    ).all()
+    currency = profile.currency if profile else "PEN"
+    lines = [
+        "Este bloque es la fuente de verdad estructurada del restaurante. No lo sustituyas con suposiciones.",
+        f"RESTAURANTE: {agent.client.name}",
+        f"DESCRIPCIÓN: {(agent.client.description or '').strip() or 'No configurada'}",
+        f"SALUDO CONFIGURADO: {(agent.widget_greeting or '').strip() or 'No configurado'}",
+    ]
+    if profile:
+        lines.extend([
+            f"DIRECCIÓN: {profile.address or 'No configurada'}",
+            f"TELÉFONO COMERCIAL: {profile.phone or 'No configurado'}",
+            f"MONEDA: {currency}",
+            f"HORARIOS: {profile.opening_hours or 'No configurados'}",
+        ])
+    else:
+        lines.append(f"MONEDA: {currency}")
+
+    lines.append("CARTA DISPONIBLE:")
+    menu_items = 0
+    for category in categories:
+        products = [product for product in category.products if product.is_available]
+        if not products:
+            continue
+        lines.append(f"- CATEGORÍA: {category.name}")
+        for product in products:
+            menu_items += 1
+            variants = ", ".join(
+                f"{item.name} (+{item.price_delta} {currency})"
+                for item in product.variants
+                if item.is_available
+            ) or "Ninguna"
+            extras = ", ".join(
+                f"{item.name} ({item.price} {currency})"
+                for item in product.extras
+                if item.is_available
+            ) or "Ninguno"
+            lines.append(
+                f"  - {product.name}: {product.price} {currency}; "
+                f"descripción: {product.description or 'No configurada'}; "
+                f"variantes: {variants}; adicionales: {extras}"
+            )
+    if not menu_items:
+        lines.append("- No hay productos disponibles configurados.")
+
+    lines.append("MODALIDADES ACTIVAS:")
+    if modalities and modalities.dine_in_enabled:
+        lines.append("- MESA: no pedir dirección; el pedido seguirá posteriormente el flujo Mesero -> Cocina -> Mesa -> Caja y el pago se realiza en caja indicando el número de mesa.")
+    if modalities and modalities.pickup_enabled:
+        lines.append("- RECOJO: confirmar nombre y pedido, e informar las condiciones y tiempos configurados; no pedir dirección de delivery.")
+    if modalities and modalities.delivery_enabled:
+        lines.append(
+            "- DELIVERY: solicitar nombre, teléfono, dirección exacta y referencia, además de cualquier variante pendiente. "
+            "Cobrar únicamente el subtotal de productos. El costo de delivery no está incluido y el personal coordina ese importe directamente con el cliente."
+        )
+        lines.append(f"- WHATSAPP RESPONSABLE DE DELIVERY: {modalities.delivery_whatsapp or 'No configurado'}.")
+    if not modalities or not any((modalities.dine_in_enabled, modalities.pickup_enabled, modalities.delivery_enabled)):
+        lines.append("- No hay modalidades activas configuradas.")
+
+    lines.append("DATOS PARA PAGOS:")
+    if payments:
+        for group in _grouped_payment_methods(payments):
+            details = "; ".join(
+                value for value in (
+                    f"número para pagos: {group['account_number']}" if group["account_number"] else "",
+                    f"titular: {', '.join(group['account_names'].values())}" if group["account_names"] else "",
+                    f"instrucciones para el cliente: {'; '.join(group['instructions'].values())}" if group["instructions"] else "",
+                ) if value
+            )
+            lines.append(f"- {details}; comprobante solicitado: {'sí' if group['receipt_required'] else 'no'}.")
+    else:
+        lines.append("- No hay datos para pagos configurados.")
+
+    role_names = {"admin": "Administrador", "cashier": "Caja", "waiter": "Mesero", "kitchen": "Cocina", "delivery": "Delivery"}
+    active_roles = sorted({role_names.get(item.role, item.role) for item in staff})
+    lines.append(f"PERSONAL ACTIVO CONFIGURADO: {', '.join(active_roles) if active_roles else 'No configurado'}.")
+    lines.extend([
+        "REGLAS OPERATIVAS:",
+        "- Saluda según el saludo configurado, identifica qué desea pedir el cliente y usa solo la carta disponible.",
+        "- No inventes productos, precios, promociones, ingredientes, disponibilidad ni datos para pagos.",
+        "- El número configurado es únicamente el destino o receptor del abono. El cliente puede pagar desde cualquier banco o billetera; el origen del pago es irrelevante y nunca debe rechazarse por no estar configurado.",
+        "- Permite únicamente variantes y adicionales configurados; en delivery el total del pedido es únicamente el subtotal de productos.",
+        "- En delivery solicita nombre, teléfono, dirección exacta y referencia. No pidas distrito o zona para calcular una tarifa y no inventes costos de delivery.",
+        '- Comunica: "El costo del delivery no está incluido. El personal de delivery se comunicará contigo para coordinar directamente el costo de la entrega."',
+        '- Para un abono anticipado de productos, comunica: "Realiza el pago de S/ XX.XX al número [número para pagos] y envíame tu comprobante." Sustituye XX.XX únicamente por el subtotal de productos.',
+        "- Muestra el pedido completo y confirma antes de finalizar.",
+        "- Un comprobante enviado no confirma automáticamente un pago digital; la confirmación depende de la revisión manual del administrador (monto, pedido/cliente, operación no utilizada y demás controles), no solo de lo que afirme el cliente.",
+        "- Después de crear un pedido de WhatsApp en PENDING_PAYMENT, continúa obligatoriamente con el pago: informa que quedó registrado y pendiente de pago, comunica el total exacto, el Número para pagos y titular configurados, solicita el abono y pide el comprobante después del pago.",
+        "- Mientras el pedido esté PENDING_PAYMENT no digas que puede recogerlo, que está listo ni que se le espera; si el cliente responde ok/gracias, recuerda de forma natural que falta realizar y verificar el pago.",
+        "- Cuando el cliente informe número de operación y monto, usa report_restaurant_payment. Un voucher o imagen nunca confirma el pago: registra los datos y deja el pedido en revisión manual para un administrador. Solo la acción explícita del administrador confirma el pago y lo envía a Cocina.",
+    ])
+    return "\n".join(lines)
+
+
+def build_system_prompt(agent: Agent, knowledge_text: str, db: Session | None = None) -> str:
     client = agent.client
     tz_name = (agent.timezone or "UTC").strip() or "UTC"
     try:
@@ -194,12 +368,18 @@ def build_system_prompt(agent: Agent, knowledge_text: str) -> str:
     except (ZoneInfoNotFoundError, ValueError):
         tz_name = "UTC"
         now = datetime.now(ZoneInfo("UTC"))
+    restaurant = db is not None and _is_restaurant_agent(agent)
     parts = [
         f"Eres {agent.name}, un agente de IA de {client.name}.",
         f"FECHA Y HORA ACTUAL ({tz_name}): {now:%Y-%m-%d %H:%M}.",
-        f"INSTRUCCIONES PRINCIPALES:\n{agent.instructions or 'Responde de forma útil y precisa.'}",
         f"PERSONALIDAD Y TONO:\n{agent.personality or 'Profesional, claro y amable.'}",
     ]
+    if restaurant:
+        parts.append(f"CONTEXTO OPERATIVO ESTRUCTURADO DEL RESTAURANTE:\n{_restaurant_operational_context(db, agent)}")
+        if agent.instructions.strip():
+            parts.append(f"INSTRUCCIONES ESPECIALES COMPLEMENTARIAS:\n{agent.instructions.strip()}")
+    else:
+        parts.append(f"INSTRUCCIONES PRINCIPALES:\n{agent.instructions or 'Responde de forma útil y precisa.'}")
     brief = _business_brief(agent)
     if brief:
         parts.append(f"BRIEF DEL NEGOCIO:\n{brief}")

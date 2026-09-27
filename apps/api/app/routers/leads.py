@@ -28,6 +28,8 @@ def _lead(db: Session, user: User, lead_id: uuid.UUID) -> Lead:
     )
     if not user.is_vendiq_admin:
         query = query.where(Lead.agency_id == user.agency_id)
+        if getattr(user, "restaurant_client_id", None):
+            query = query.where(Lead.client_id == user.restaurant_client_id)
     lead = db.scalar(query)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -44,6 +46,7 @@ def _detail(lead: Lead) -> LeadDetail:
             created_at=link.created_at,
         )
         for link in sorted(lead.conversations, key=lambda item: item.created_at)
+        if link.conversation.client_id == lead.client_id
     ]
     return LeadDetail(**base.model_dump(), conversations=conversations)
 
@@ -61,6 +64,8 @@ def list_leads(
     query = select(Lead)
     if not user.is_vendiq_admin:
         query = query.where(Lead.agency_id == user.agency_id)
+        if getattr(user, "restaurant_client_id", None):
+            query = query.where(Lead.client_id == user.restaurant_client_id)
     if client_id:
         query = query.where(Lead.client_id == client_id)
     if status:

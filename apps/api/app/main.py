@@ -15,6 +15,9 @@ from .routers import (
     leads,
     portal,
     providers,
+    reports,
+    restaurants,
+    orders,
     subscriptions,
     promotions,
     whatsapp,
@@ -22,9 +25,9 @@ from .routers import (
     whatsapp_cloud_webhook,
     widget,
 )
-
-
 settings = get_settings()
+
+
 app = FastAPI(
     title="OpenLivery API",
     description="API to manage agencies, clients and AI agents.",
@@ -53,6 +56,9 @@ app.include_router(clients.router, prefix="/api")
 app.include_router(agents.router, prefix="/api")
 app.include_router(agent_tools.router, prefix="/api")
 app.include_router(providers.router, prefix="/api")
+app.include_router(restaurants.router, prefix="/api")
+app.include_router(orders.router, prefix="/api")
+app.include_router(reports.router, prefix="/api")
 app.include_router(catalog.router, prefix="/api")
 app.include_router(conversations.router, prefix="/api")
 app.include_router(leads.router, prefix="/api")

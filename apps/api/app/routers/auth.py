@@ -2,10 +2,11 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..config import get_settings
+from ..config import get_settings, is_local_development
 from ..database import get_db
 from ..deps import get_current_user
 from ..models import Agency, Client, User
+from ..models_restaurant import RestaurantStaff
 from ..ratelimit import login_rate_limit, portal_verification_rate_limit
 from ..schemas import (
     LoginRequest,
@@ -34,6 +35,8 @@ from ..services.portal_verification import (
     is_password_reset_verified_token,
     is_user_password_reset_token,
     is_user_password_reset_verified_token,
+    USER_EMAIL_VERIFICATION_TOKEN_TYPE,
+    is_user_email_verification_token,
     pending_session,
     pending_user_session,
     recovery_client,
@@ -80,6 +83,40 @@ def _registration_open(db: Session) -> bool:
     if get_settings().allow_multi_agency:
         return True
     return db.scalar(select(Agency.id).limit(1)) is None
+
+
+def _restaurant_redirect(db: Session, user: User) -> str:
+    if user.is_vendiq_admin:
+        return "/"
+    assignment = db.execute(
+        select(Client.id, RestaurantStaff.role)
+        .join(RestaurantStaff, RestaurantStaff.client_id == Client.id)
+        .where(
+            RestaurantStaff.user_id == user.id,
+            RestaurantStaff.is_active.is_(True),
+            func.lower(func.trim(Client.industry)) == "restaurante",
+        )
+        .order_by(RestaurantStaff.created_at.asc())
+    ).first()
+    client_id = assignment[0] if assignment else None
+    role = assignment[1] if assignment else None
+    if not client_id and user.role == "admin":
+        client_id = db.scalar(
+            select(Client.id)
+            .where(Client.agency_id == user.agency_id, func.lower(func.trim(Client.industry)) == "restaurante")
+            .order_by(Client.created_at.asc())
+        )
+        role = "admin" if client_id else None
+    if client_id and role == "admin":
+        return f"/?client_id={client_id}"
+    return f"/orders?client_id={client_id}" if client_id else "/"
+
+
+def _pending_user_login(response: Response, db: Session, user: User) -> dict:
+    if not user.password_recovery_code_hash:
+        user.password_recovery_credentials_version += 1
+        issue_user_code(db, user)
+    return pending_user_session(response, user, USER_EMAIL_VERIFICATION_TOKEN_TYPE)
 
 
 @router.get("/status", dependencies=[Depends(login_rate_limit)])
@@ -141,6 +178,12 @@ def register(payload: RegisterRequest, response: Response, db: Session = Depends
     db.add_all([user, client])
     db.commit()
     db.refresh(user)
+    # Keep the first-run local development flow usable without an SMTP server.
+    # Restaurant owners intentionally stay on the explicit verification flow,
+    # which is also the behavior used in every non-local environment.
+    if is_local_development() and payload.industry.strip().casefold() != "restaurante":
+        _set_session_cookie(response, user)
+        return user
     issue_code(db, client)
     return pending_session(response, client, REGISTRATION_TOKEN_TYPE)
 
@@ -158,6 +201,8 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
     ))
     if pending_client:
         return pending_session(response, pending_client, REGISTRATION_TOKEN_TYPE)
+    if not user.is_vendiq_admin and user.email_verification_pending and not is_local_development():
+        return _pending_user_login(response, db, user)
     _set_session_cookie(response, user)
     return user
 
@@ -183,8 +228,10 @@ def unified_login(payload: LoginRequest, response: Response, db: Session = Depen
         ))
         if pending_client:
             return pending_session(response, pending_client, REGISTRATION_TOKEN_TYPE)
+        if not user.is_vendiq_admin and user.email_verification_pending and not is_local_development():
+            return _pending_user_login(response, db, user)
         _set_session_cookie(response, user)
-        return {"principal_type": "admin", "redirect_to": "/"}
+        return {"principal_type": "admin", "redirect_to": _restaurant_redirect(db, user)}
 
     if len(portal_clients) == 1:
         client = portal_clients[0]
@@ -195,6 +242,39 @@ def unified_login(payload: LoginRequest, response: Response, db: Session = Depen
             return {"principal_type": "portal", "redirect_to": f"/portal/{client.portal_slug}"}
 
     raise HTTPException(status_code=401, detail="Incorrect email or password")
+
+
+@router.post("/email-verification/resend", dependencies=[Depends(portal_verification_rate_limit)])
+def resend_user_email_verification(
+    response: Response,
+    portal_verification_token: str | None = Cookie(default=None),
+    db: Session = Depends(get_db),
+):
+    if not is_user_email_verification_token(portal_verification_token):
+        raise HTTPException(status_code=401, detail="La sesión de verificación no es válida.")
+    user = verification_user(db, portal_verification_token)
+    user.password_recovery_credentials_version += 1
+    issue_user_code(db, user)
+    pending_user_session(response, user, USER_EMAIL_VERIFICATION_TOKEN_TYPE)
+    return {"status": "sent", "retry_after": retry_after_user(user)}
+
+
+@router.post("/email-verification/confirm", response_model=UnifiedLoginOut, dependencies=[Depends(portal_verification_rate_limit)])
+def confirm_user_email_verification(
+    payload: PortalVerificationConfirm,
+    response: Response,
+    portal_verification_token: str | None = Cookie(default=None),
+    db: Session = Depends(get_db),
+):
+    if not is_user_email_verification_token(portal_verification_token):
+        raise HTTPException(status_code=401, detail="La sesión de verificación no es válida.")
+    user = verification_user(db, portal_verification_token)
+    confirm_user_code(db, user, payload.code)
+    user.email_verification_pending = False
+    db.commit()
+    _set_session_cookie(response, user)
+    response.delete_cookie(COOKIE, path="/api")
+    return {"principal_type": "admin", "redirect_to": _restaurant_redirect(db, user)}
 
 
 _PASSWORD_RECOVERY_MESSAGE = "Si el correo está registrado, recibirás un código de recuperación."

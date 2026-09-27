@@ -5,10 +5,11 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
+import pytest
 
 from sqlalchemy import select
 
-from app.models import Conversation, Lead, LeadConversation, Message, WhatsAppChannel
+from app.models import Client, Conversation, Lead, LeadConversation, Message, User, WhatsAppChannel, now_utc
 from app.config import get_settings
 from app.schemas_leads import LeadCaptureInput
 from app.services import ai as ai_service
@@ -21,11 +22,18 @@ from app.routers import dashboard as dashboard_router
 from conftest import TestingSession
 
 
+@pytest.fixture(autouse=True)
+def skip_email_delivery(monkeypatch):
+    monkeypatch.setattr("app.services.portal_verification.send_verification_email", lambda *args: None)
+
+
 def _setup(client: TestClient, client_name: str = "VendeIA Customer") -> tuple[str, str, str]:
-    customer = client.post(
+    customer_response = client.post(
         "/api/clients",
         json={"name": client_name, "industry": "Sales", "description": "", "general_context": "", "is_active": True},
-    ).json()
+    )
+    assert customer_response.status_code == 201, customer_response.text
+    customer = customer_response.json()
     client.put("/api/providers/openai", json={"api_key": "secret"})
     agent = client.post(
         "/api/agents",
@@ -380,6 +388,52 @@ def test_verified_whatsapp_explicit_conflicting_phone_keeps_existing_identity(au
         db.refresh(trusted_lead)
         assert trusted_lead.phone_normalized == "51911111111"
         assert db.get(Lead, other_id).phone_normalized == "51922222222"
+
+
+def test_restaurant_relinks_stale_conversation_lead_without_merging_contacts(authenticated_client: TestClient):
+    client = authenticated_client
+    with TestingSession() as db:
+        user = db.scalar(select(User).where(User.email == "ana@prisma.com"))
+        user.is_vendiq_admin = True
+        user.email_verification_pending = False
+        initial_client = db.scalar(select(Client).where(Client.agency_id == user.agency_id))
+        initial_client.portal_enabled = True
+        initial_client.portal_email_verified_at = now_utc()
+        db.commit()
+    login = client.post("/api/auth/login", json={"email": "ana@prisma.com", "password": "contrasena-segura"})
+    assert login.status_code == 200, login.text
+    client_id, agent_id, conversation_id = _setup(client, "Restaurante aislado")
+    with TestingSession() as db:
+        restaurant = db.get(Client, uuid.UUID(client_id))
+        restaurant.industry = "restaurante"
+        conversation = db.get(Conversation, uuid.UUID(conversation_id))
+        old = Lead(
+            agency_id=conversation.agency_id,
+            client_id=conversation.client_id,
+            agent_id=conversation.agent_id,
+            name="Contacto anterior",
+            phone="51911111111",
+            phone_normalized="51911111111",
+            source="playground",
+        )
+        db.add(old)
+        db.flush()
+        db.add(LeadConversation(lead_id=old.id, conversation_id=conversation.id))
+        db.commit()
+
+        result = create_or_update_lead(
+            db,
+            lead_context_from_conversation(conversation),
+            LeadCaptureInput(name="Contacto actual", phone="51922222222"),
+        )
+        db.commit()
+
+        assert result.created is True
+        assert result.lead.id != old.id
+        assert db.get(Lead, old.id).phone_normalized == "51911111111"
+        linked = db.scalar(select(Lead).join(LeadConversation).where(LeadConversation.conversation_id == conversation.id))
+        assert linked.id == result.lead.id
+        assert linked.phone_normalized == "51922222222"
 
 
 def test_create_and_progressively_update_lead(authenticated_client: TestClient):

@@ -2,12 +2,13 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { api, ApiError, messageFrom } from "@/lib/api";
+import { restaurantAwareRedirect } from "@/lib/auth-navigation";
 import { useT } from "@/lib/i18n";
 import { Alert } from "@/components/ui";
 
-export type VerificationPending = { status: "verification_required"; masked_email: string; retry_after: number };
+export type VerificationPending = { status: "verification_required"; masked_email: string; retry_after: number; verification_type?: "user" };
 
-export function PortalEmailVerification({ pending, onBack, backLabel }: { pending: VerificationPending; onBack: () => void; backLabel?: string }) {
+export function PortalEmailVerification({ pending, onBack, backLabel, verificationType }: { pending: VerificationPending; onBack: () => void; backLabel?: string; verificationType?: "portal" | "user" }) {
   const t = useT();
   const [code, setCode] = useState("");
   const [wait, setWait] = useState(pending.retry_after);
@@ -18,14 +19,16 @@ export function PortalEmailVerification({ pending, onBack, backLabel }: { pendin
   async function confirm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError("");
     try {
-      const result = await api<{ redirect_to: string }>("/portal/email-verification/confirm", { method: "POST", body: JSON.stringify({ code }) });
-      window.location.assign(result.redirect_to);
+      const prefix = verificationType === "user" ? "/auth/email-verification" : "/portal/email-verification";
+      const result = await api<{ redirect_to: string }>(`${prefix}/confirm`, { method: "POST", body: JSON.stringify({ code }) });
+      window.location.assign(verificationType === "user" ? await restaurantAwareRedirect(result.redirect_to) : result.redirect_to);
     } catch (err) { setError(messageFrom(err)); } finally { setBusy(false); }
   }
   async function resend() {
     setBusy(true); setError(""); setSent(false);
     try {
-      const result = await api<{ retry_after: number }>("/portal/email-verification/resend", { method: "POST" });
+      const prefix = verificationType === "user" ? "/auth/email-verification" : "/portal/email-verification";
+      const result = await api<{ retry_after: number }>(`${prefix}/resend`, { method: "POST" });
       setWait(result.retry_after); setCode(""); setSent(true);
     } catch (err) { setError(messageFrom(err)); if (err instanceof ApiError) setWait(err.retryAfter ?? 0); }
     finally { setBusy(false); }

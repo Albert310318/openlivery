@@ -7,8 +7,8 @@ import { api, messageFrom } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
 type Config = { title: string; greeting: string; color: string; position: string; agency_name: string; agency_logo_url: string | null };
-type Msg = { role: "user" | "assistant"; content: string };
-type Reply = { mode: string; reply: string | null; messages: Msg[] };
+type Msg = { role: "user" | "assistant"; content: string; media_url?: string | null; media_filename?: string | null };
+type Reply = { mode: string; reply: string | null; messages: Msg[]; media_url?: string | null; media_filename?: string | null };
 
 export default function WidgetPage() {
   const t = useT();
@@ -52,7 +52,7 @@ export default function WidgetPage() {
     setMessages((current) => [...current, { role: "user", content }]);
     try {
       const data = await api<Reply>(`/widget/${publicId}/messages`, { method: "POST", body: JSON.stringify({ session_id: session, content }) });
-      if (data.reply) setMessages((current) => [...current, { role: "assistant", content: data.reply as string }]);
+      if (data.reply) setMessages((current) => [...current, { role: "assistant", content: data.reply as string, media_url: data.media_url, media_filename: data.media_filename }]);
     } catch (err) { setError(messageFrom(err)); } finally { setBusy(false); inputRef.current?.focus(); }
   }
 
@@ -72,7 +72,7 @@ export default function WidgetPage() {
       </header>
       <div className="widget-messages">
         {showGreeting && <div className="widget-msg assistant"><div className="widget-bubble">{config.greeting}</div></div>}
-        {messages.map((message, index) => <div key={index} className={`widget-msg ${message.role}`}><div className="widget-bubble">{message.content}</div></div>)}
+        {messages.map((message, index) => <div key={index} className={`widget-msg ${message.role}`}><div className="widget-bubble">{message.content}{message.media_url && <img className="conversation-media" src={message.media_url} alt={message.media_filename || "Publicidad de bienvenida"} />}</div></div>)}
         {busy && <div className="widget-msg assistant"><div className="widget-bubble widget-typing"><i /><i /><i /></div></div>}
         <div ref={endRef} />
       </div>

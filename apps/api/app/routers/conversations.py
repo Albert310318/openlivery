@@ -19,9 +19,11 @@ from ..services.tools import run_completion
 from ..services.knowledge import build_system_prompt, retrieve_knowledge
 from ..services.leads import lead_context_from_conversation
 from ..services.media import describe_image, transcribe_audio
+from ..services.payment_reviews import attach_payment_receipt
 from ..services.providers import resolve_agent_credentials, resolve_provider_credentials
 from ..services.usage import record_usage
 from ..services.whatsapp import send_channel_message
+from ..services.welcome_flyer import create_welcome_flyer_message
 
 
 router = APIRouter(prefix="/conversations", tags=["Conversations"])
@@ -42,6 +44,8 @@ def _conversation(db: Session, user: User, conversation_id: uuid.UUID) -> Conver
     )
     if not user.is_vendiq_admin:
         query = query.where(Conversation.agency_id == user.agency_id)
+        if getattr(user, "restaurant_client_id", None):
+            query = query.where(Conversation.client_id == user.restaurant_client_id)
     conversation = db.scalar(query)
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -58,6 +62,8 @@ def list_conversations(
     query = select(Conversation)
     if not user.is_vendiq_admin:
         query = query.where(Conversation.agency_id == user.agency_id)
+        if getattr(user, "restaurant_client_id", None):
+            query = query.where(Conversation.client_id == user.restaurant_client_id)
     if agent_id:
         query = query.where(Conversation.agent_id == agent_id)
     if client_id:
@@ -148,6 +154,8 @@ def create_conversation(payload: ConversationCreate, db: Session = Depends(get_d
     agent_query = select(Agent).where(Agent.id == payload.agent_id)
     if not user.is_vendiq_admin:
         agent_query = agent_query.where(Agent.agency_id == user.agency_id)
+        if getattr(user, "restaurant_client_id", None):
+            agent_query = agent_query.where(Agent.client_id == user.restaurant_client_id)
     agent = db.scalar(agent_query)
     if not agent:
         raise HTTPException(status_code=400, detail="The selected agent does not exist")
@@ -174,6 +182,15 @@ def get_conversation(conversation_id: uuid.UUID, db: Session = Depends(get_db), 
     return _conversation(db, user, conversation_id)
 
 
+@router.get("/{conversation_id}/messages/{message_id}/media")
+def get_message_media(conversation_id: uuid.UUID, message_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    conversation = _conversation(db, user, conversation_id)
+    message = db.scalar(select(Message).where(Message.id == message_id, Message.conversation_id == conversation.id))
+    if not message or not message.media_data:
+        raise HTTPException(status_code=404, detail="Message media not found")
+    return Response(content=message.media_data, media_type=message.media_mime or "application/octet-stream", headers={"Cache-Control": "no-store"})
+
+
 def _ready_agent(db: Session, conversation: Conversation) -> tuple[Agent, tuple[str, str]]:
     """Validate the conversation can produce an AI reply and return the agent + credentials."""
     agent = conversation.agent
@@ -197,13 +214,15 @@ async def _generate_reply(
     agent: Agent,
     credentials: tuple[str, str],
     query: str,
+    *,
+    is_new_conversation: bool = False,
 ) -> Conversation:
     """Run the agent over the current conversation and store the assistant reply."""
     knowledge = await retrieve_knowledge(db, agent, query)
     refreshed = _conversation(db, user, conversation.id)
     recent = refreshed.messages[-agent.memory_limit:] if agent.memory_limit else []
     history = [{"role": item.role, "content": item.content} for item in recent]
-    messages = [{"role": "system", "content": build_system_prompt(agent, knowledge.text)}, *history]
+    messages = [{"role": "system", "content": build_system_prompt(agent, knowledge.text, db)}, *history]
     base_url, api_key = credentials
     completion = await run_completion(
         db,
@@ -226,6 +245,7 @@ async def _generate_reply(
             sender_name=agent.name,
         )
     )
+    create_welcome_flyer_message(db, conversation, only_new=is_new_conversation)
     record_usage(db, agent.agency_id, agent.id, agent.provider, agent.model.strip(), completion)
     conversation.updated_at = now_utc()
     db.commit()
@@ -241,6 +261,7 @@ async def send_message(
 ):
     conversation = _conversation(db, user, conversation_id)
     agent, credentials = _ready_agent(db, conversation)
+    is_new_conversation = not conversation.messages
 
     content = payload.content.strip()
     if not conversation.messages:
@@ -248,7 +269,7 @@ async def send_message(
     conversation.updated_at = now_utc()
     db.add(Message(conversation_id=conversation.id, role="user", content=content, sender_type="visitor", sender_name="You"))
     db.commit()
-    return await _generate_reply(db, user, conversation, agent, credentials, content)
+    return await _generate_reply(db, user, conversation, agent, credentials, content, is_new_conversation=is_new_conversation)
 
 
 @router.post("/{conversation_id}/media", response_model=ConversationDetail)
@@ -261,6 +282,7 @@ async def send_media_message(
 ):
     conversation = _conversation(db, user, conversation_id)
     agent, credentials = _ready_agent(db, conversation)
+    is_new_conversation = not conversation.messages
 
     content_type = (file.content_type or "").lower()
     is_image = content_type.startswith("image/")
@@ -296,12 +318,21 @@ async def send_media_message(
         transcript = await transcribe_audio(base_url, api_key, model, data, file.filename or "audio.ogg", content_type)
         content = (f"{caption}\n\n" if caption else "") + (transcript or "[Audio sin contenido reconocible]")
 
+    if is_image:
+        attach_payment_receipt(
+            db,
+            conversation_id=conversation.id,
+            data=data,
+            filename=file.filename,
+            mime=content_type,
+        )
+
     if not conversation.messages:
         conversation.title = (caption or content)[:80]
     conversation.updated_at = now_utc()
     db.add(Message(conversation_id=conversation.id, role="user", content=content, sender_type="visitor", sender_name="You"))
     db.commit()
-    return await _generate_reply(db, user, conversation, agent, credentials, content)
+    return await _generate_reply(db, user, conversation, agent, credentials, content, is_new_conversation=is_new_conversation)
 
 
 @router.patch("/{conversation_id}/mode", response_model=ConversationDetail)

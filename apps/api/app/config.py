@@ -2,6 +2,7 @@ from functools import lru_cache
 from datetime import datetime, timezone
 import logging
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -12,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
+    environment: str = "development"
     smtp_host: str = ""
     smtp_port: int = 1025
     smtp_username: str = ""
@@ -51,6 +53,9 @@ class Settings(BaseSettings):
     # Meta Graph API root used by the WhatsApp Cloud API channel; override to
     # point at a mock server in tests.
     meta_graph_base_url: str = "https://graph.facebook.com/v23.0"
+    payment_notification_match_window_hours: int = 48
+    payment_mailbox_poll_interval_seconds: int = 60
+    payment_mailbox_imap_timeout_seconds: int = 20
 
     model_config = SettingsConfigDict(
         env_file=(REPO_ROOT / ".env", APP_DIR / ".env"),
@@ -62,6 +67,12 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def is_local_development() -> bool:
+    settings = get_settings()
+    hostname = urlparse(settings.frontend_url).hostname
+    return settings.environment.strip().lower() in {"development", "dev", "local"} and hostname in {"localhost", "127.0.0.1", "::1"}
 
 
 def parse_trial_activation_eligible_since(value: str | None) -> datetime | None:

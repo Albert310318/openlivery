@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowRight, BadgeCheck, Bot, Clock3, ContactRound, Cpu, MessagesSquare, Percent, Sparkles, Trophy, UserPlus, UserRound } from "lucide-react";
+import { ArrowRight, BadgeCheck, BarChart3, Bot, Clock3, ContactRound, Cpu, Inbox, MessagesSquare, Percent, Radio, Settings2, ShoppingBag, Sparkles, Trophy, UserPlus, UserRound, UsersRound } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { api, messageFrom } from "@/lib/api";
 import { getOriginatingConversationId } from "@/lib/leads";
@@ -11,7 +11,7 @@ import { useToast } from "@/components/toast";
 import { PageHead, StatusBadge } from "@/components/ui";
 import { ListRowsSkeleton, PanelSkeleton, Skeleton } from "@/components/skeleton";
 import { BrandLogo } from "@/components/brand";
-import type { Agent, AgentSummary, Lead, LeadStatus } from "@/types";
+import type { Agent, AgentSummary, Lead, LeadStatus, User } from "@/types";
 import { PublicLanding } from "@/components/public-landing";
 
 type PendingFollowUp = { id: string; name: string | null; interest: string | null; next_follow_up_at: string; is_overdue: boolean };
@@ -36,19 +36,21 @@ export default function HomePage() {
   const [loadedMetrics, setLoadedMetrics] = useState(false);
   const [authResolved, setAuthResolved] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   useEffect(() => {
     api("/auth/me")
-      .then(() => setAuthenticated(true))
+      .then((user) => { setCurrentUser(user as User); setAuthenticated(true); })
       .catch(() => setAuthenticated(false))
       .finally(() => setAuthResolved(true));
   }, []);
 
-  useEffect(() => { if (!authResolved || !authenticated) return; Promise.all([api<Dashboard>("/dashboard"), api<Agent[]>("/agents"), api<Lead[]>("/leads?limit=5")]).then(([d, a, leads]) => { setData(d); setAgents(a); setRecentLeads(leads); }).catch(() => {}).finally(() => setLoadedCore(true)); }, [authResolved, authenticated]);
-  useEffect(() => { if (!authResolved || !authenticated) return; setLoadedMetrics(false); api<Metrics>(`/dashboard/metrics?days=${range}`).then(setMetrics).catch(() => {}).finally(() => setLoadedMetrics(true)); }, [authResolved, authenticated, range]);
+  useEffect(() => { if (!authResolved || !authenticated || !currentUser || currentUser.restaurant_role === "admin") return; Promise.all([api<Dashboard>("/dashboard"), api<Agent[]>("/agents"), api<Lead[]>("/leads?limit=5")]).then(([d, a, leads]) => { setData(d); setAgents(a); setRecentLeads(leads); }).catch(() => {}).finally(() => setLoadedCore(true)); }, [authResolved, authenticated, currentUser]);
+  useEffect(() => { if (!authResolved || !authenticated || !currentUser || currentUser.restaurant_role === "admin") return; setLoadedMetrics(false); api<Metrics>(`/dashboard/metrics?days=${range}`).then(setMetrics).catch(() => {}).finally(() => setLoadedMetrics(true)); }, [authResolved, authenticated, currentUser, range]);
 
   if (!authResolved) return <div className="landing-loading" aria-busy="true"><BrandLogo variant="compact" /></div>;
   if (!authenticated) return <PublicLanding />;
+  if (currentUser?.restaurant_role === "admin" && !currentUser.is_vendiq_admin) return <RestaurantAdminHome user={currentUser} />;
 
   const maxDaily = Math.max(1, ...(metrics?.daily_conversations.map((p) => p.count) ?? [0]));
   const trend = metrics?.daily_conversations ?? [];
@@ -125,4 +127,20 @@ export default function HomePage() {
       </section>
     </div>
   );
+}
+
+function RestaurantAdminHome({ user }: { user: User }) {
+  const links = [
+    { href: "/agents", title: "Agentes", description: "Administra los agentes de tu restaurante.", icon: Bot },
+    { href: "/inbox", title: "Inbox", description: "Revisa y responde conversaciones de tus clientes.", icon: Inbox },
+    { href: "/reports", title: "Reportes de ventas", description: "Consulta ventas y pagos confirmados.", icon: BarChart3 },
+    { href: "/channels", title: "Canales", description: "Configura los canales de comunicación.", icon: Radio },
+    { href: "/orders", title: "Pedidos", description: "Gestiona pedidos, pagos y operación.", icon: ShoppingBag },
+    { href: "/personal", title: "Personal", description: "Administra los accesos operativos.", icon: UsersRound },
+    { href: "/onboarding", title: "Configuración del restaurante", description: "Actualiza menú, pagos y modalidades.", icon: Settings2 },
+  ] as const;
+  return <div className="page">
+    <PageHead eyebrow={user.restaurant_client_name || "Restaurante"} title="Inicio" description="Administra la operación de tu empresa desde un solo lugar." />
+    <section className="panel"><div className="panel-head"><div><h3>Accesos rápidos</h3><p>Solo tienes acceso a la información de tu empresa.</p></div></div><div className="restaurant-quick-links">{links.map(({ href, title, description, icon: Icon }) => <Link className="restaurant-quick-card" href={`${href}?client_id=${encodeURIComponent(user.restaurant_client_id || "")}`} key={href}><span className="restaurant-quick-card-icon"><Icon size={20} aria-hidden="true" /></span><span className="restaurant-quick-card-copy"><strong>{title}</strong><span>{description}</span></span><ArrowRight className="restaurant-quick-card-arrow" size={17} aria-hidden="true" /></Link>)}</div></section>
+  </div>;
 }

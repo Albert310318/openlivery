@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ...models import Agent, AgentTool
+from ...models import Agent, AgentTool, Client
 from ..ai import Completion, chat_completion
 from ..leads import LeadContext, trusted_whatsapp_phone
 from ..lead_handoffs import handoff_available
@@ -20,6 +20,10 @@ from .internal import (
     SALES_ADVISOR_RULES,
     SALES_ADVISOR_TOOL_SCHEMA,
     TRUSTED_WHATSAPP_LEAD_RULE,
+    RESTAURANT_ORDER_RULES,
+    RESTAURANT_ORDER_TOOL_SCHEMA,
+    RESTAURANT_PAYMENT_REPORT_TOOL_SCHEMA,
+    pending_restaurant_payment_message,
 )
 from .loop import anthropic_tool_loop, openai_tool_loop
 from .specs import ToolSpec, build_tool_specs
@@ -49,6 +53,66 @@ def _with_lead_rules(messages: list[dict], rules: str) -> list[dict]:
             amended[index] = {**message, "content": f"{message['content']}\n\n{rules}"}
             return amended
     return [{"role": "system", "content": rules}, *amended]
+
+
+def _enforce_restaurant_payment_continuation(
+    db: Session,
+    agent: Agent,
+    context: LeadContext | None,
+    completion: Completion,
+) -> Completion:
+    """Keep a pending restaurant order in the payment flow.
+
+    The model is still responsible for the natural wording, but a provider
+    response must not be allowed to close the conversation or claim pickup
+    readiness after the order tool has returned ``pending_payment``.  This is
+    shared by Playground and WhatsApp because both call ``run_completion``.
+    """
+
+    if context is None or (agent.client.industry or "").strip().casefold() != "restaurante":
+        return completion
+    create_succeeded = any(
+        call.get("name") == "create_restaurant_order"
+        and not call.get("is_error")
+        and '"status":"pending_payment"' in call.get("result_preview", "")
+        for call in completion.tool_calls or []
+    )
+    report_pending = any(
+        call.get("name") == "report_restaurant_payment"
+        and not call.get("is_error")
+        and '"payment_review_status":"review"' in call.get("result_preview", "")
+        for call in completion.tool_calls or []
+    )
+    mandatory = pending_restaurant_payment_message(db, context, verification_failed=report_pending)
+    if mandatory is None:
+        return completion
+
+    lowered = completion.text.casefold()
+    closing_or_ready = any(
+        phrase in lowered
+        for phrase in (
+            "puedes recoger",
+            "puede recoger",
+            "te esperamos",
+            "listo para recoger",
+            "pedido está listo",
+            "pedido esta listo",
+            "hasta luego",
+            "hasta pronto",
+            "que tengas",
+            "buen provecho",
+            "gracias por tu pedido",
+            "desped",
+        )
+    )
+    contains_payment_details = "pendiente de pago" in lowered and "número para pagos" in lowered
+    if create_succeeded or report_pending or closing_or_ready:
+        text = mandatory
+    elif not contains_payment_details:
+        text = f"{completion.text.rstrip()}\n\n{mandatory}"
+    else:
+        text = completion.text
+    return Completion(text, completion.input_tokens, completion.output_tokens, tool_calls=completion.tool_calls)
 
 
 async def run_completion(
@@ -106,23 +170,54 @@ async def run_completion(
                     internal_name="notify_sales_advisor",
                 ),
             )
+        client = db.get(Client, agent.client_id)
+        if client and client.industry.strip().casefold() == "restaurante":
+            specs.insert(
+                0,
+                ToolSpec(
+                    name="create_restaurant_order",
+                    description=(
+                        "Create the confirmed order for the current restaurant conversation. "
+                        "Call only after the customer explicitly confirms all items and the product subtotal. "
+                        "The server validates the structured menu; delivery is coordinated externally and is never added to the restaurant order total."
+                    ),
+                    input_schema=RESTAURANT_ORDER_TOOL_SCHEMA,
+                    internal_name="create_restaurant_order",
+                ),
+            )
+            specs.insert(
+                1,
+                ToolSpec(
+                    name="report_restaurant_payment",
+                    description=(
+                        "Record the operation and amount explicitly reported by the customer for the current pending order. "
+                        "This never confirms payment; it sends the voucher and payment data to manual administrator review."
+                    ),
+                    input_schema=RESTAURANT_PAYMENT_REPORT_TOOL_SCHEMA,
+                    internal_name="report_restaurant_payment",
+                ),
+            )
         lead_rules = LEAD_CAPTURE_RULES
         if has_trusted_whatsapp_phone:
             lead_rules = f"{lead_rules} {TRUSTED_WHATSAPP_LEAD_RULE}"
         if handoff_available(db, tool_context):
             lead_rules = f"{lead_rules} {SALES_ADVISOR_RULES}"
+        if client and client.industry.strip().casefold() == "restaurante":
+            lead_rules = f"{lead_rules} {RESTAURANT_ORDER_RULES}"
         messages = _with_lead_rules(messages, lead_rules)
     if not specs:
         return await chat_completion(agent.provider, base_url, api_key, model, messages, temperature=temperature, max_tokens=max_tokens)
     messages = _with_tool_rules(messages)
     try:
         if agent.provider == "anthropic":
-            return await anthropic_tool_loop(
+            completion = await anthropic_tool_loop(
                 base_url, api_key, model, messages, specs, temperature, max_tokens, db, tool_context
             )
-        return await openai_tool_loop(
-            base_url, api_key, model, messages, specs, temperature, max_tokens, db, tool_context
-        )
+        else:
+            completion = await openai_tool_loop(
+                base_url, api_key, model, messages, specs, temperature, max_tokens, db, tool_context
+            )
+        return _enforce_restaurant_payment_continuation(db, agent, tool_context, completion)
     except HTTPException:
         raise
     except (httpx.HTTPError, KeyError, ValueError, IndexError) as exc:

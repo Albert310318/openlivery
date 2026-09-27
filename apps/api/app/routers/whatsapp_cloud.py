@@ -17,12 +17,13 @@ router = APIRouter(prefix="/whatsapp-cloud", tags=["WhatsApp Cloud"])
 
 
 def _channel_for_user(db: Session, user: User, client_id: uuid.UUID) -> WhatsAppCloudChannel:
-    channel = db.scalar(
-        select(WhatsAppCloudChannel).where(
-            WhatsAppCloudChannel.client_id == client_id,
-            WhatsAppCloudChannel.agency_id == user.agency_id,
-        )
+    query = select(WhatsAppCloudChannel).where(
+        WhatsAppCloudChannel.client_id == client_id,
+        WhatsAppCloudChannel.agency_id == user.agency_id,
     )
+    if not user.is_vendiq_admin and getattr(user, "restaurant_client_id", None):
+        query = query.where(WhatsAppCloudChannel.client_id == user.restaurant_client_id)
+    channel = db.scalar(query)
     if not channel:
         raise HTTPException(status_code=404, detail="This client does not have the WhatsApp API configured yet")
     return channel
@@ -65,16 +66,20 @@ def configure_channel(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    client = db.scalar(select(Client).where(Client.id == client_id, Client.agency_id == user.agency_id))
+    client_query = select(Client).where(Client.id == client_id, Client.agency_id == user.agency_id)
+    if not user.is_vendiq_admin and getattr(user, "restaurant_client_id", None):
+        client_query = client_query.where(Client.id == user.restaurant_client_id)
+    client = db.scalar(client_query)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
-    agent = db.scalar(
-        select(Agent).where(
+    agent_query = select(Agent).where(
             Agent.id == payload.agent_id,
             Agent.client_id == client.id,
             Agent.agency_id == user.agency_id,
         )
-    )
+    if not user.is_vendiq_admin and getattr(user, "restaurant_client_id", None):
+        agent_query = agent_query.where(Agent.client_id == user.restaurant_client_id)
+    agent = db.scalar(agent_query)
     if not agent:
         raise HTTPException(status_code=400, detail="Select an agent that belongs to this client")
     channel = db.scalar(select(WhatsAppCloudChannel).where(WhatsAppCloudChannel.client_id == client.id))

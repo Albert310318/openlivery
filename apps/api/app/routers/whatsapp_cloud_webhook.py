@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import uuid
+import base64
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -20,7 +21,7 @@ from ..database import get_db
 from ..models import Message, WhatsAppCloudChannel, now_utc
 from ..ratelimit import whatsapp_cloud_webhook_rate_limit
 from ..security import decrypt_secret
-from ..services.whatsapp_cloud import fetch_media, send_text
+from ..services.whatsapp_cloud import fetch_media, send_image, send_text
 from ..services.whatsapp_inbound import InboundMessage, process_inbound
 
 
@@ -167,4 +168,23 @@ async def _handle_message(
         message = db.get(Message, result.outbound_message_id)
         if message:
             message.external_message_id = wamid
+            db.commit()
+    if result.welcome_flyer_data and result.welcome_flyer_message_id:
+        try:
+            flyer_wamid = await send_image(
+                access_token,
+                channel.phone_number_id,
+                inbound.external_chat_id,
+                base64.b64decode(result.welcome_flyer_data),
+                result.welcome_flyer_mime or "image/jpeg",
+                result.welcome_flyer_caption,
+            )
+            if flyer_wamid:
+                flyer = db.get(Message, result.welcome_flyer_message_id)
+                if flyer:
+                    flyer.external_message_id = flyer_wamid
+                    db.commit()
+        except HTTPException as exc:
+            channel.last_error = f"The welcome flyer could not be sent: {exc.detail}"
+            channel.updated_at = now_utc()
             db.commit()

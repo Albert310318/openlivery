@@ -10,6 +10,7 @@ from ..services.tools import run_completion
 from ..services.knowledge import build_system_prompt, retrieve_knowledge
 from ..services.providers import resolve_agent_credentials
 from ..services.usage import record_usage
+from ..services.welcome_flyer import create_welcome_flyer_message
 
 
 router = APIRouter(prefix="/widget", tags=["Widget"])
@@ -86,13 +87,15 @@ def widget_history(public_id: str, session_id: str, db: Session = Depends(get_db
     return {
         "mode": conversation.mode,
         "reply": None,
-        "messages": [{"role": item.role, "content": item.content} for item in messages],
+        "messages": [{"role": item.role, "content": item.content, "media_url": item.media_url, "media_filename": item.media_filename} for item in messages],
     }
 
 
 @router.post("/{public_id}/messages", response_model=WidgetReply, dependencies=[Depends(widget_rate_limit)])
 async def widget_message(public_id: str, payload: WidgetMessageIn, db: Session = Depends(get_db)):
     agent = _agent(db, public_id)
+    existing = db.scalar(select(Conversation).where(Conversation.agent_id == agent.id, Conversation.channel == "widget", Conversation.external_chat_id == f"widget:{payload.session_id}"))
+    is_new_conversation = existing is None
     conversation = _conversation(db, agent, payload.session_id)
 
     content = payload.content.strip()
@@ -119,7 +122,7 @@ async def widget_message(public_id: str, payload: WidgetMessageIn, db: Session =
     ).all()
     history = list(reversed(history))
     messages = [
-        {"role": "system", "content": build_system_prompt(agent, knowledge.text)},
+        {"role": "system", "content": build_system_prompt(agent, knowledge.text, db)},
         *[{"role": item.role, "content": item.content} for item in history],
     ]
     base_url, api_key = credentials
@@ -133,6 +136,7 @@ async def widget_message(public_id: str, payload: WidgetMessageIn, db: Session =
 
     conversation.updated_at = now_utc()
     db.add(Message(conversation_id=conversation.id, role="assistant", content=completion.text, sources=knowledge.sources, tool_calls=completion.tool_calls, sender_type="ai", sender_name=agent.name))
+    flyer = create_welcome_flyer_message(db, conversation, only_new=is_new_conversation)
     record_usage(db, agent.agency_id, agent.id, agent.provider, agent.model.strip(), completion)
     db.commit()
-    return {"mode": "ai", "reply": completion.text, "messages": []}
+    return {"mode": "ai", "reply": completion.text, "messages": [], "media_url": flyer.media_url if flyer else None, "media_filename": flyer.media_filename if flyer else None}

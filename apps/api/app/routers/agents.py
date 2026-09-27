@@ -28,6 +28,8 @@ def _agent(db: Session, user: User, agent_id: uuid.UUID) -> Agent:
     )
     if not user.is_vendiq_admin:
         query = query.where(Agent.agency_id == user.agency_id)
+        if getattr(user, "restaurant_client_id", None):
+            query = query.where(Agent.client_id == user.restaurant_client_id)
     agent = db.scalar(query)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -38,6 +40,8 @@ def _validate_client(db: Session, user: User, client_id: uuid.UUID) -> Client:
     query = select(Client).where(Client.id == client_id)
     if not user.is_vendiq_admin:
         query = query.where(Client.agency_id == user.agency_id)
+        if getattr(user, "restaurant_client_id", None):
+            query = query.where(Client.id == user.restaurant_client_id)
     client = db.scalar(query)
     if not client:
         raise HTTPException(status_code=400, detail="The selected client does not exist")
@@ -53,6 +57,8 @@ def list_agents(db: Session = Depends(get_db), user: User = Depends(get_current_
     )
     if not user.is_vendiq_admin:
         query = query.where(Agent.agency_id == user.agency_id)
+        if getattr(user, "restaurant_client_id", None):
+            query = query.where(Agent.client_id == user.restaurant_client_id)
     return db.scalars(query).unique().all()
 
 

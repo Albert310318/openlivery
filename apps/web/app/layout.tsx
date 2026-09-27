@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import "./globals.css";
 import { AppShell } from "@/components/app-shell";
 import { ToastProvider } from "@/components/toast";
@@ -19,7 +20,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body>
         <LanguageProvider>
           <ToastProvider>
-            <AppShell>{children}</AppShell>
+            <Suspense fallback={null}>
+              <AppShell>{children}</AppShell>
+            </Suspense>
           </ToastProvider>
         </LanguageProvider>
       </body>

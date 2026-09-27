@@ -15,7 +15,7 @@ import { AgentToolsTab } from "@/components/agent-tools/agent-tools-tab";
 import { Combobox } from "@/components/combobox";
 import { PROVIDERS, modelsFor, defaultModelFor, estimateTokens, modelContextWindow, AUDIO_MODELS, IMAGE_MODELS } from "@/lib/providers";
 import { TIMEZONES } from "@/lib/timezones";
-import type { Agent, AgentTool, Client, KnowledgeDocument, QAPair } from "@/types";
+import type { Agent, AgentTool, Client, KnowledgeDocument, QAPair, User } from "@/types";
 
 type Tab = "details" | "knowledge" | "tools" | "widget" | "playground";
 
@@ -25,6 +25,7 @@ export default function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [agent, setAgent] = useState<Agent | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
+  const [isGlobalAdmin, setIsGlobalAdmin] = useState(false);
   const [provider, setProvider] = useState("openai");
   const [model, setModel] = useState("");
   const [timezone, setTimezone] = useState("UTC");
@@ -47,7 +48,8 @@ export default function AgentDetailPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
-    const [a, c, d, q, tl] = await Promise.all([api<Agent>(`/agents/${id}`), accessibleClients(), api<KnowledgeDocument[]>(`/agents/${id}/documents`), api<QAPair[]>(`/agents/${id}/qa`), api<AgentTool[]>(`/agents/${id}/tools`)]);
+    const [me, a, c, d, q, tl] = await Promise.all([api<User>("/auth/me"), api<Agent>(`/agents/${id}`), accessibleClients(), api<KnowledgeDocument[]>(`/agents/${id}/documents`), api<QAPair[]>(`/agents/${id}/qa`), api<AgentTool[]>(`/agents/${id}/tools`)]);
+    setIsGlobalAdmin(me.is_vendiq_admin);
     setAgent(a); setClients(c); setDocuments(d); setQaPairs(q); setTools(tl);
     setProvider(a.provider); setModel(a.model); setTimezone(a.timezone || "UTC");
     setTemperature(a.temperature); setMaxTokens(a.max_tokens); setMemoryLimit(a.memory_limit);
@@ -139,7 +141,7 @@ export default function AgentDetailPage() {
     <nav className="tabs"><button className={tab === "details" ? "active" : ""} onClick={() => setTab("details")}><Settings2 size={17} /> {t("agents.detail.tabDetails")}</button><button className={tab === "knowledge" ? "active" : ""} onClick={() => setTab("knowledge")}><FileText size={17} /> {t("agents.detail.tabKnowledge")} <span>{documents.length}</span></button><button className={tab === "tools" ? "active" : ""} onClick={() => setTab("tools")}><Wrench size={17} /> {t("tools.tab")} <span>{tools.length}</span></button><button className={tab === "widget" ? "active" : ""} onClick={() => setTab("widget")}><Code size={17} /> {t("agents.detail.tabWidget")}</button><button className={tab === "playground" ? "active" : ""} onClick={() => setTab("playground")}><MessageSquareText size={17} /> {t("agents.detail.tabPlayground")}</button></nav>
 
     {tab === "details" && <form className="settings-form" onSubmit={saveConfig}>
-      <section className="settings-section"><div className="settings-copy"><h3>{t("agents.detail.generalHeading")}</h3><p>{t("agents.detail.generalCopy")}</p></div><div className="settings-fields"><div className="form-grid"><label>{t("agents.detail.clientLabel")}<select name="client_id" defaultValue={agent.client_id}>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label><label>{t("agents.detail.nameLabel")}<input name="name" required defaultValue={agent.name} /></label></div><label>{t("agents.detail.descriptionLabel")}<textarea name="description" rows={3} defaultValue={agent.description} /></label></div></section>
+      <section className="settings-section"><div className="settings-copy"><h3>{t("agents.detail.generalHeading")}</h3><p>{t("agents.detail.generalCopy")}</p></div><div className="settings-fields"><div className="form-grid">{isGlobalAdmin ? <label>{t("agents.detail.clientLabel")}<select name="client_id" defaultValue={agent.client_id}>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label> : <div className="field-block"><span className="field-label">{t("agents.detail.clientLabel")}</span><strong>{clients[0]?.name || "—"}</strong><input type="hidden" name="client_id" value={agent.client_id} /></div>}<label>{t("agents.detail.nameLabel")}<input name="name" required defaultValue={agent.name} /></label></div><label>{t("agents.detail.descriptionLabel")}<textarea name="description" rows={3} defaultValue={agent.description} /></label></div></section>
       <section className="settings-section"><div className="settings-copy"><h3>{t("agents.detail.behaviorHeading")}</h3><p>{t("agents.detail.behaviorCopy")}</p></div><div className="settings-fields"><label>{t("agents.detail.instructionsLabel")}<textarea name="instructions" rows={8} defaultValue={agent.instructions} placeholder={t("agents.detail.instructionsPlaceholder")} /></label><label>{t("agents.detail.personalityLabel")}<textarea name="personality" rows={4} defaultValue={agent.personality} placeholder={t("agents.detail.personalityPlaceholder")} /></label></div></section>
       <section className="settings-section"><div className="settings-copy"><h3>{t("agents.detail.briefHeading")}</h3><p>{t("agents.detail.briefCopy")}</p></div><div className="settings-fields">
         <label>{t("agents.detail.briefSummaryLabel")}<textarea name="brief_summary" rows={2} defaultValue={agent.brief_summary} placeholder={t("agents.detail.briefSummaryPlaceholder")} /></label>

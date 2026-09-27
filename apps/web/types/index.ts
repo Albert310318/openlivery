@@ -5,7 +5,98 @@ export type User = {
   role: string;
   is_vendiq_admin: boolean;
   agency: Agency;
+  restaurant_role?: "admin" | "cashier" | "waiter" | "kitchen" | "delivery" | null;
+  restaurant_client_id?: string | null;
+  restaurant_client_name?: string | null;
 };
+
+export type RestaurantOrderItem = {
+  id: string;
+  product_id: string;
+  product_name: string;
+  base_unit_price: string;
+  unit_price: string;
+  quantity: number;
+  line_subtotal: string;
+  variants: { id: string; name: string; price_delta?: string; price?: string }[];
+  extras: { id: string; name: string; price_delta?: string; price?: string }[];
+  observations: string | null;
+  is_cancelled: boolean;
+  cancelled_at: string | null;
+};
+export type RestaurantOrder = {
+  id: string;
+  client_id: string;
+  order_number: string;
+  source: "whatsapp" | "waiter";
+  modality: "dine_in" | "pickup" | "delivery";
+  table_account_id: string | null;
+  table_number: string | null;
+  customer_name: string | null;
+  customer_phone: string | null;
+  address: string | null;
+  address_reference: string | null;
+  delivery_zone_name: string | null;
+  subtotal: string;
+  delivery_fee: string;
+  total: string;
+  order_status: string;
+  payment_status: string;
+  payment_verification_status: string;
+  payment_method: string | null;
+  receipt_submitted: boolean;
+  payment_reference: string | null;
+  reported_payment_amount: string | null;
+  payment_reported_at: string | null;
+  payment_review_status: string;
+  payment_rejection_reason: string | null;
+  payment_rejected_at: string | null;
+  payment_receipt_available: boolean;
+  payment_receipt_filename: string | null;
+  payment_receipt_mime: string | null;
+  notes: string | null;
+  created_by_user_id: string | null;
+  conversation_id: string | null;
+  created_at: string;
+  updated_at: string;
+  payment_confirmed_at: string | null;
+  ready_at: string | null;
+  delivered_at: string | null;
+  items: RestaurantOrderItem[];
+};
+export type DeliveryNotification = { id: string; client_id: string; order_id: string; order_number: string; recipient: string; provider: string | null; status: "pending" | "sent" | "error"; external_message_id: string | null; error_message: string | null; attempts: number; sent_at: string | null; updated_at: string };
+export type DeliveryOrder = {
+  id: string;
+  client_id: string;
+  order_number: string;
+  modality: "delivery";
+  customer_name: string | null;
+  customer_phone: string | null;
+  address: string | null;
+  address_reference: string | null;
+  order_status: string;
+  items: { id: string; product_name: string; quantity: number; observations: string | null; variants: { name: string }[]; extras: { name: string }[] }[];
+  created_at: string;
+  ready_at: string | null;
+  delivered_at: string | null;
+};
+export type RestaurantTableAccount = {
+  id: string;
+  client_id: string;
+  table_number: string;
+  status: string;
+  is_open: boolean;
+  opened_at: string;
+  paid_at: string | null;
+  closed_at: string | null;
+  subtotal: string;
+  total: string;
+  orders: RestaurantOrder[];
+};
+export type RestaurantMenuOption = { id: string; name: string; price: string; price_delta?: string; is_available: boolean };
+export type RestaurantMenuProduct = { id: string; name: string; price: string; is_available: boolean; variants: RestaurantMenuOption[]; extras: RestaurantMenuOption[] };
+export type RestaurantMenuCategory = { id: string; name: string; products: RestaurantMenuProduct[] };
+export type RestaurantStaffAssignment = { user_id: string; role: string; is_active: boolean; user: { id: string; name: string; email: string; phone: string | null } };
 
 export type Agency = { id: string; name: string; slug: string; brand_color: string; logo_url: string | null };
 
@@ -120,7 +211,7 @@ export type AgentTool = {
 export type ToolCallMeta = { name: string; arguments: Record<string, unknown>; result_preview: string; is_error: boolean };
 
 export type Source = { id: string; filename: string; excerpt: string };
-export type Message = { id: string; role: "user" | "assistant"; content: string; sources: Source[]; tool_calls?: ToolCallMeta[] | null; sender_type: "visitor" | "ai" | "human"; sender_name: string | null; created_at: string };
+export type Message = { id: string; role: "user" | "assistant"; content: string; sources: Source[]; tool_calls?: ToolCallMeta[] | null; sender_type: "visitor" | "ai" | "human"; sender_name: string | null; media_kind?: string | null; media_mime?: string | null; media_filename?: string | null; media_url?: string | null; created_at: string };
 export type ConversationLead = { id: string; name: string | null; phone: string | null; email: string | null; interest: string | null; budget: string | null; preferred_contact_time: string | null; status: string };
 export type LeadStatus = "new" | "qualified" | "follow_up" | "won" | "lost";
 export type Lead = {
@@ -219,3 +310,40 @@ export type PortalPublic = {
   agency_brand_color: string;
   agency_logo_url: string | null;
 };
+
+export type RestaurantProfile = {
+  id: string;
+  client_id: string;
+  address: string;
+  phone: string;
+  currency: string;
+  opening_hours: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MenuOption = { id: string; name: string; price: string | number; is_available: boolean; position: number };
+export type MenuProduct = {
+  id: string;
+  client_id: string;
+  category_id: string;
+  name: string;
+  description: string;
+  price: string | number;
+  image_url: string | null;
+  is_available: boolean;
+  position: number;
+  variants: MenuOption[];
+  extras: MenuOption[];
+};
+export type MenuCategory = { id: string; client_id: string; name: string; position: number; is_active: boolean; products: MenuProduct[] };
+export type RestaurantModalities = { id: string; client_id: string; dine_in_enabled: boolean; pickup_enabled: boolean; delivery_enabled: boolean; delivery_whatsapp: string | null; created_at: string; updated_at: string };
+export type DeliveryZone = { id: string; client_id: string; name: string; fee: string | number; minimum_order: string | number; estimated_minutes: number; is_active: boolean; created_at: string; updated_at: string };
+export type RestaurantPaymentMethod = { id: string; client_id: string; method: "cash" | "yape" | "plin" | "transfer" | "card" | "other"; display_name: string; instructions: string; account_name: string; account_number: string; qr_image_url: string | null; receipt_required: boolean; is_active: boolean; created_at: string; updated_at: string };
+export type RestaurantPaymentMailbox = { id: string; client_id: string; email: string; imap_host: string; imap_port: number; imap_ssl: boolean; has_app_password: boolean; is_enabled: boolean; connection_status: string; last_checked_at: string | null; last_error: string | null };
+export type RestaurantStaff = { id: string; client_id: string; user_id: string; role: "admin" | "cashier" | "waiter" | "kitchen" | "delivery"; is_active: boolean; user: { id: string; name: string; email: string; phone: string | null; role: string }; created_at: string; updated_at: string };
+export type RestaurantStaffCandidate = { id: string; name: string; email: string; phone: string | null; role: string };
+export type RestaurantWelcomeFlyer = { id: string; client_id: string; filename: string; mime_type: string; enabled: boolean; message: string; image_url: string; created_at: string; updated_at: string };
+export type RestaurantOnboardingAgent = { id: string; client_id: string; name: string; personality: string; instructions: string; widget_greeting: string; is_active: boolean };
+export type RestaurantReadiness = { profile: boolean; menu: boolean; modalities: boolean; payments: boolean; staff: boolean; agent: boolean; ready: boolean; status: "incomplete" | "ready_to_activate" | "agent_active" };
+export type RestaurantOnboarding = { profile: RestaurantProfile; welcome_flyer: RestaurantWelcomeFlyer | null; categories: MenuCategory[]; modalities: RestaurantModalities; delivery_zones: DeliveryZone[]; payment_methods: RestaurantPaymentMethod[]; payment_mailbox: RestaurantPaymentMailbox | null; staff: RestaurantStaff[]; staff_candidates: RestaurantStaffCandidate[]; agent: RestaurantOnboardingAgent | null; readiness: RestaurantReadiness };

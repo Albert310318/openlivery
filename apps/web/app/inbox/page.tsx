@@ -234,7 +234,7 @@ export default function InboxPage() {
               {selected.messages?.map((message) => (
                 <div key={message.id} className={`inbox-message ${message.role}`}>
                   <small>{message.sender_name || (message.role === "assistant" ? t("inbox.senderAgent") : t("inbox.senderVisitor"))} · {formatWhen(message.created_at, lang)}</small>
-                  <p>{message.content}</p>
+                  <p>{message.content}{message.media_url && <img className="conversation-media" src={message.media_url} alt={message.media_filename || "Publicidad de bienvenida"} />}</p>
                 </div>
               ))}
             </div>
