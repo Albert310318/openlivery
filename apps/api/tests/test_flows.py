@@ -150,8 +150,8 @@ def test_provider_key_is_stored_masked(authenticated_client: TestClient):
     assert next(p for p in listed if p["provider"] == "openai")["configured"] is True
 
 
-def test_main_crud_knowledge_and_persistent_chat(authenticated_client: TestClient, monkeypatch):
-    client = authenticated_client
+def test_main_crud_knowledge_and_persistent_chat(global_admin_client: TestClient, monkeypatch):
+    client = global_admin_client
     customer = client.post(
         "/api/clients",
         json={
@@ -234,8 +234,8 @@ def test_main_crud_knowledge_and_persistent_chat(authenticated_client: TestClien
     assert client.delete(f"/api/agents/{agent_id}").status_code == 204
 
 
-def test_widget_public_chat_and_gating(authenticated_client: TestClient, monkeypatch):
-    client = authenticated_client
+def test_widget_public_chat_and_gating(global_admin_client: TestClient, monkeypatch):
+    client = global_admin_client
     customer = client.post(
         "/api/clients",
         json={"name": "Widget Co", "industry": "", "description": "", "general_context": "", "is_active": True},
@@ -280,8 +280,8 @@ def test_widget_public_chat_and_gating(authenticated_client: TestClient, monkeyp
     assert inbox_row["unread_count"] == 0
 
 
-def test_inbox_pagination_and_search(authenticated_client: TestClient):
-    client = authenticated_client
+def test_inbox_pagination_and_search(global_admin_client: TestClient):
+    client = global_admin_client
     customer = client.post(
         "/api/clients",
         json={"name": "Paged Co", "industry": "", "description": "", "general_context": "", "is_active": True},
@@ -304,8 +304,8 @@ def test_inbox_pagination_and_search(authenticated_client: TestClient):
     assert client.get("/api/conversations/inbox?search=zzznomatch").json() == []
 
 
-def test_usage_recorded_and_reported(authenticated_client: TestClient, monkeypatch):
-    client = authenticated_client
+def test_usage_recorded_and_reported(global_admin_client: TestClient, monkeypatch):
+    client = global_admin_client
     customer = client.post(
         "/api/clients",
         json={"name": "Usage Co", "industry": "", "description": "", "general_context": "", "is_active": True},
@@ -326,8 +326,8 @@ def test_usage_recorded_and_reported(authenticated_client: TestClient, monkeypat
     assert any(item["model"] == "gpt-4.1-mini" for item in metrics["usage_by_model"])
 
 
-def test_dashboard_metrics(authenticated_client: TestClient):
-    client = authenticated_client
+def test_dashboard_metrics(global_admin_client: TestClient):
+    client = global_admin_client
     customer = client.post(
         "/api/clients",
         json={"name": "Metrics Co", "industry": "", "description": "", "general_context": "", "is_active": True},
@@ -353,8 +353,8 @@ def test_dashboard_metrics(authenticated_client: TestClient):
     assert client.get("/api/dashboard/metrics?days=0").status_code == 422
 
 
-def test_agent_qa_pairs_reach_prompt(authenticated_client: TestClient, monkeypatch):
-    client = authenticated_client
+def test_agent_qa_pairs_reach_prompt(global_admin_client: TestClient, monkeypatch):
+    client = global_admin_client
     customer = client.post(
         "/api/clients",
         json={"name": "FAQ Co", "industry": "", "description": "", "general_context": "", "is_active": True},
@@ -381,8 +381,8 @@ def test_agent_qa_pairs_reach_prompt(authenticated_client: TestClient, monkeypat
     assert client.get(f"/api/agents/{agent['id']}/qa").json() == []
 
 
-def test_agent_brief_persists_and_reaches_prompt(authenticated_client: TestClient, monkeypatch):
-    client = authenticated_client
+def test_agent_brief_persists_and_reaches_prompt(global_admin_client: TestClient, monkeypatch):
+    client = global_admin_client
     customer = client.post(
         "/api/clients",
         json={"name": "Brief Co", "industry": "", "description": "", "general_context": "", "is_active": True},
@@ -413,8 +413,8 @@ def test_agent_brief_persists_and_reaches_prompt(authenticated_client: TestClien
     assert "Never promise same-day delivery" in prompt
 
 
-def test_custom_portal_domain_flow(authenticated_client: TestClient, monkeypatch):
-    client = authenticated_client
+def test_custom_portal_domain_flow(global_admin_client: TestClient, monkeypatch):
+    client = global_admin_client
     customer = client.post(
         "/api/clients",
         json={"name": "Brand", "industry": "", "description": "", "general_context": "", "is_active": True},
@@ -457,8 +457,8 @@ def test_custom_portal_domain_flow(authenticated_client: TestClient, monkeypatch
     assert client.get("/api/public/portal-domain?domain=chat.brand.com").status_code == 404
 
 
-def test_media_message_uses_image_capability(authenticated_client: TestClient, monkeypatch):
-    client = authenticated_client
+def test_media_message_uses_image_capability(global_admin_client: TestClient, monkeypatch):
+    client = global_admin_client
     customer = client.post(
         "/api/clients",
         json={"name": "Pizza Co", "industry": "", "description": "", "general_context": "", "is_active": True},
@@ -487,8 +487,8 @@ def test_media_message_uses_image_capability(authenticated_client: TestClient, m
     assert any("a red pepperoni pizza" in message["content"] for message in prompt_messages)
 
 
-def test_media_message_rejected_when_capability_disabled(authenticated_client: TestClient):
-    client = authenticated_client
+def test_media_message_rejected_when_capability_disabled(global_admin_client: TestClient):
+    client = global_admin_client
     customer = client.post(
         "/api/clients",
         json={"name": "Shop", "industry": "", "description": "", "general_context": "", "is_active": True},
@@ -507,17 +507,17 @@ def test_media_message_rejected_when_capability_disabled(authenticated_client: T
     assert "Image recognition is disabled" in rejected.json()["detail"]
 
 
-def test_agent_without_model_explains_configuration(authenticated_client: TestClient):
-    customer = authenticated_client.post(
+def test_agent_without_model_explains_configuration(global_admin_client: TestClient):
+    customer = global_admin_client.post(
         "/api/clients",
         json={"name": "Client", "industry": "", "description": "", "general_context": "", "is_active": True},
     ).json()
-    agent = authenticated_client.post(
+    agent = global_admin_client.post(
         "/api/agents",
         json={"client_id": customer["id"], "name": "Agent", "description": "", "instructions": "", "personality": "", "model": "", "is_active": True},
     ).json()
-    conversation = authenticated_client.post("/api/conversations", json={"agent_id": agent["id"]}).json()
-    response = authenticated_client.post(
+    conversation = global_admin_client.post("/api/conversations", json={"agent_id": agent["id"]}).json()
+    response = global_admin_client.post(
         f"/api/conversations/{conversation['id']}/messages",
         json={"content": "Hello"},
     )
@@ -525,8 +525,8 @@ def test_agent_without_model_explains_configuration(authenticated_client: TestCl
     assert "not ready" in response.json()["detail"]
 
 
-def test_white_label_portal_and_human_takeover(authenticated_client: TestClient):
-    client = authenticated_client
+def test_white_label_portal_and_human_takeover(global_admin_client: TestClient):
+    client = global_admin_client
     agency = client.patch(
         "/api/agency",
         json={"name": "Prisma Studio Agency", "slug": "prisma-studio", "brand_color": "#635BFF"},
@@ -605,8 +605,8 @@ def test_provider_test_returns_models(authenticated_client: TestClient, monkeypa
     assert tested.json()["models"] == ["model-a", "model-b"]
 
 
-def test_whatsapp_inbound_image_uses_capability(authenticated_client: TestClient, monkeypatch):
-    client = authenticated_client
+def test_whatsapp_inbound_image_uses_capability(global_admin_client: TestClient, monkeypatch):
+    client = global_admin_client
     customer = client.post(
         "/api/clients",
         json={"name": "Bistro", "industry": "", "description": "", "general_context": "", "is_active": True},
@@ -644,8 +644,8 @@ def test_whatsapp_inbound_image_uses_capability(authenticated_client: TestClient
     assert any("a photo of the menu" in message["content"] for message in prompt_messages)
 
 
-def test_whatsapp_channel_inbound_ai_takeover_and_session(authenticated_client: TestClient, monkeypatch):
-    client = authenticated_client
+def test_whatsapp_channel_inbound_ai_takeover_and_session(global_admin_client: TestClient, monkeypatch):
+    client = global_admin_client
     customer = client.post(
         "/api/clients",
         json={"name": "Sol Store", "industry": "Retail", "description": "", "general_context": "Open Monday through Saturday.", "is_active": True},
@@ -732,8 +732,8 @@ def test_whatsapp_channel_inbound_ai_takeover_and_session(authenticated_client: 
     assert client.patch(f"/api/conversations/{conversation_id}/mode", json={"mode": "ai"}).json()["mode"] == "ai"
 
 
-def test_inflight_ai_response_and_tool_continue_after_human_takeover(authenticated_client: TestClient, monkeypatch):
-    client = authenticated_client
+def test_inflight_ai_response_and_tool_continue_after_human_takeover(global_admin_client: TestClient, monkeypatch):
+    client = global_admin_client
     customer = client.post(
         "/api/clients",
         json={"name": "Concurrency Test", "industry": "Testing", "description": "", "general_context": "", "is_active": True},

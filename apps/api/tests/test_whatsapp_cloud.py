@@ -90,8 +90,8 @@ def _setup_channel(client: TestClient, *, image_enabled: bool = False) -> tuple[
     return customer, agent, channel
 
 
-def test_configure_channel_hides_secrets(authenticated_client: TestClient, monkeypatch):
-    client = authenticated_client
+def test_configure_channel_hides_secrets(global_admin_client: TestClient, monkeypatch):
+    client = global_admin_client
     customer, agent, channel = _setup_channel(client)
     assert channel["has_access_token"] is True
     assert channel["has_app_secret"] is True
@@ -124,8 +124,8 @@ def test_configure_channel_hides_secrets(authenticated_client: TestClient, monke
     assert client.get(f"/api/whatsapp-cloud/channels/{customer['id']}").status_code == 404
 
 
-def test_connect_verifies_credentials(authenticated_client: TestClient, monkeypatch):
-    client = authenticated_client
+def test_connect_verifies_credentials(global_admin_client: TestClient, monkeypatch):
+    client = global_admin_client
     customer, _agent, _channel = _setup_channel(client)
 
     fake_verify = AsyncMock(return_value={"display_phone_number": "+57 300 111 2233", "verified_name": "Bistro"})
@@ -146,8 +146,8 @@ def test_connect_verifies_credentials(authenticated_client: TestClient, monkeypa
     assert disconnected["is_enabled"] is False
 
 
-def test_webhook_verify_handshake(authenticated_client: TestClient):
-    client = authenticated_client
+def test_webhook_verify_handshake(global_admin_client: TestClient):
+    client = global_admin_client
     _customer, _agent, channel = _setup_channel(client)
     url = f"/api/public/whatsapp-cloud/channels/{channel['id']}/webhook"
     ok = client.get(
@@ -161,8 +161,8 @@ def test_webhook_verify_handshake(authenticated_client: TestClient):
     ).status_code == 403
 
 
-def test_webhook_rejects_bad_signature(authenticated_client: TestClient, monkeypatch):
-    client = authenticated_client
+def test_webhook_rejects_bad_signature(global_admin_client: TestClient, monkeypatch):
+    client = global_admin_client
     _customer, _agent, channel = _setup_channel(client)
     fake_completion = AsyncMock(return_value=ai_service.Completion(text="Hello!"))
     monkeypatch.setattr(whatsapp_inbound_service, "run_completion", fake_completion)
@@ -179,8 +179,8 @@ def test_webhook_rejects_bad_signature(authenticated_client: TestClient, monkeyp
     assert fake_completion.await_count == 0
 
 
-def test_webhook_text_message_creates_conversation_and_replies(authenticated_client: TestClient, monkeypatch):
-    client = authenticated_client
+def test_webhook_text_message_creates_conversation_and_replies(global_admin_client: TestClient, monkeypatch):
+    client = global_admin_client
     _customer, _agent, channel = _setup_channel(client)
     fake_completion = AsyncMock(return_value=ai_service.Completion(text="We are open every day."))
     monkeypatch.setattr(whatsapp_inbound_service, "run_completion", fake_completion)
@@ -208,8 +208,8 @@ def test_webhook_text_message_creates_conversation_and_replies(authenticated_cli
     assert fake_send.await_count == 1
 
 
-def test_webhook_ignores_statuses_and_unsupported_types(authenticated_client: TestClient, monkeypatch):
-    client = authenticated_client
+def test_webhook_ignores_statuses_and_unsupported_types(global_admin_client: TestClient, monkeypatch):
+    client = global_admin_client
     _customer, _agent, channel = _setup_channel(client)
     fake_completion = AsyncMock(return_value=ai_service.Completion(text="Hi"))
     monkeypatch.setattr(whatsapp_inbound_service, "run_completion", fake_completion)
@@ -233,8 +233,8 @@ def test_webhook_ignores_statuses_and_unsupported_types(authenticated_client: Te
     assert fake_completion.await_count == 0
 
 
-def test_webhook_human_mode_skips_ai(authenticated_client: TestClient, monkeypatch):
-    client = authenticated_client
+def test_webhook_human_mode_skips_ai(global_admin_client: TestClient, monkeypatch):
+    client = global_admin_client
     _customer, _agent, channel = _setup_channel(client)
     fake_completion = AsyncMock(return_value=ai_service.Completion(text="AI reply"))
     monkeypatch.setattr(whatsapp_inbound_service, "run_completion", fake_completion)
@@ -262,8 +262,8 @@ def test_webhook_human_mode_skips_ai(authenticated_client: TestClient, monkeypat
     operator_send.assert_awaited_once_with("meta-access-token", "111", "5730011", "Hola Maria, te ayudo yo.")
 
 
-def test_webhook_image_uses_capability(authenticated_client: TestClient, monkeypatch):
-    client = authenticated_client
+def test_webhook_image_uses_capability(global_admin_client: TestClient, monkeypatch):
+    client = global_admin_client
     _customer, _agent, channel = _setup_channel(client, image_enabled=True)
     monkeypatch.setattr(webhook_router, "fetch_media", AsyncMock(return_value=(b"fake-image-bytes", "image/jpeg")))
     monkeypatch.setattr(whatsapp_inbound_service, "describe_image", AsyncMock(return_value="a photo of the menu"))

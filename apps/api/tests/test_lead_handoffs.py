@@ -89,20 +89,20 @@ def _add_consent(conversation_id: str, text: str, previous_agent_text: str | Non
         db.commit()
 
 
-def test_sales_advisor_phone_can_be_saved_changed_and_removed(authenticated_client: TestClient):
-    customer = authenticated_client.post("/api/clients", json={"name": "Tours"}).json()
+def test_sales_advisor_phone_can_be_saved_changed_and_removed(global_admin_client: TestClient):
+    customer = global_admin_client.post("/api/clients", json={"name": "Tours"}).json()
     url = f"/api/clients/{customer['id']}"
-    saved = authenticated_client.patch(url, json={"sales_advisor_phone": "+51 (987) 654-321"})
+    saved = global_admin_client.patch(url, json={"sales_advisor_phone": "+51 (987) 654-321"})
     assert saved.status_code == 200
     assert saved.json()["sales_advisor_phone"] == "+51987654321"
-    changed = authenticated_client.patch(url, json={"sales_advisor_phone": "51911122233"})
+    changed = global_admin_client.patch(url, json={"sales_advisor_phone": "51911122233"})
     assert changed.json()["sales_advisor_phone"] == "51911122233"
-    removed = authenticated_client.patch(url, json={"sales_advisor_phone": None})
+    removed = global_admin_client.patch(url, json={"sales_advisor_phone": None})
     assert removed.json()["sales_advisor_phone"] is None
 
 
-def test_explicit_consent_sends_persisted_lead_once(authenticated_client: TestClient, monkeypatch):
-    _, conversation_id = _setup(authenticated_client, "Chiclayo Tours")
+def test_explicit_consent_sends_persisted_lead_once(global_admin_client: TestClient, monkeypatch):
+    _, conversation_id = _setup(global_admin_client, "Chiclayo Tours")
     consent = "Sí, quiero que un asesor me escriba"
     _add_consent(conversation_id, consent)
     sender = AsyncMock(return_value={"external_message_id": "wa-out-1"})
@@ -126,8 +126,8 @@ def test_explicit_consent_sends_persisted_lead_once(authenticated_client: TestCl
     assert len(handoffs) == 1
 
 
-def test_ambiguous_or_missing_consent_does_not_send(authenticated_client: TestClient, monkeypatch):
-    _, conversation_id = _setup(authenticated_client, "Ambiguous")
+def test_ambiguous_or_missing_consent_does_not_send(global_admin_client: TestClient, monkeypatch):
+    _, conversation_id = _setup(global_admin_client, "Ambiguous")
     _add_consent(conversation_id, "Sí")
     sender = AsyncMock()
     monkeypatch.setattr(lead_handoffs, "bridge_command", sender)
@@ -142,8 +142,8 @@ def test_ambiguous_or_missing_consent_does_not_send(authenticated_client: TestCl
     sender.assert_not_awaited()
 
 
-def test_contact_time_is_consent_after_advisor_coordination(authenticated_client: TestClient, monkeypatch):
-    _, conversation_id = _setup(authenticated_client, "Contextual")
+def test_contact_time_is_consent_after_advisor_coordination(global_admin_client: TestClient, monkeypatch):
+    _, conversation_id = _setup(global_admin_client, "Contextual")
     consent = "Por las tardes por favor"
     _add_consent(
         conversation_id,
@@ -159,11 +159,11 @@ def test_contact_time_is_consent_after_advisor_coordination(authenticated_client
     sender.assert_awaited_once()
 
 
-def test_clear_advisor_continuation_followed_by_yes_or_ok_is_valid(authenticated_client: TestClient, monkeypatch):
+def test_clear_advisor_continuation_followed_by_yes_or_ok_is_valid(global_admin_client: TestClient, monkeypatch):
     sender = AsyncMock(return_value={"external_message_id": "wa-clear-proposal"})
     monkeypatch.setattr(lead_handoffs, "bridge_command", sender)
     for index, consent in enumerate(("Sí", "Ok")):
-        _, conversation_id = _setup(authenticated_client, f"Clear proposal {index}")
+        _, conversation_id = _setup(global_admin_client, f"Clear proposal {index}")
         _add_consent(conversation_id, consent, "Un asesor puede continuar con la atención")
         with TestingSession() as db:
             conversation = db.get(Conversation, uuid.UUID(conversation_id))
@@ -172,8 +172,8 @@ def test_clear_advisor_continuation_followed_by_yes_or_ok_is_valid(authenticated
     assert sender.await_count == 2
 
 
-def test_casual_advisor_mention_followed_by_yes_is_not_valid(authenticated_client: TestClient, monkeypatch):
-    _, conversation_id = _setup(authenticated_client, "Casual mention")
+def test_casual_advisor_mention_followed_by_yes_is_not_valid(global_admin_client: TestClient, monkeypatch):
+    _, conversation_id = _setup(global_admin_client, "Casual mention")
     _add_consent(conversation_id, "Sí", "Ayer hablé con un asesor sobre nuestros tours")
     sender = AsyncMock()
     monkeypatch.setattr(lead_handoffs, "bridge_command", sender)
@@ -188,8 +188,8 @@ def test_casual_advisor_mention_followed_by_yes_is_not_valid(authenticated_clien
     sender.assert_not_awaited()
 
 
-def test_contact_time_without_advisor_context_does_not_send(authenticated_client: TestClient, monkeypatch):
-    _, conversation_id = _setup(authenticated_client, "No context")
+def test_contact_time_without_advisor_context_does_not_send(global_admin_client: TestClient, monkeypatch):
+    _, conversation_id = _setup(global_admin_client, "No context")
     consent = "Por las tardes"
     _add_consent(conversation_id, consent, "¿Qué horario tiene la tienda?")
     sender = AsyncMock()
@@ -205,8 +205,8 @@ def test_contact_time_without_advisor_context_does_not_send(authenticated_client
     sender.assert_not_awaited()
 
 
-def test_explicit_rejection_after_advisor_question_does_not_send(authenticated_client: TestClient, monkeypatch):
-    _, conversation_id = _setup(authenticated_client, "Rejected")
+def test_explicit_rejection_after_advisor_question_does_not_send(global_admin_client: TestClient, monkeypatch):
+    _, conversation_id = _setup(global_admin_client, "Rejected")
     consent = "No, por la tarde tampoco puedo"
     _add_consent(conversation_id, consent, "¿A qué hora puede llamarte un asesor?")
     sender = AsyncMock()
@@ -222,8 +222,8 @@ def test_explicit_rejection_after_advisor_question_does_not_send(authenticated_c
     sender.assert_not_awaited()
 
 
-def test_unconfigured_advisor_does_not_send(authenticated_client: TestClient, monkeypatch):
-    _, conversation_id = _setup(authenticated_client, "No advisor", advisor=None)
+def test_unconfigured_advisor_does_not_send(global_admin_client: TestClient, monkeypatch):
+    _, conversation_id = _setup(global_admin_client, "No advisor", advisor=None)
     consent = "Sí, pueden llamarme"
     _add_consent(conversation_id, consent)
     sender = AsyncMock()
@@ -239,9 +239,9 @@ def test_unconfigured_advisor_does_not_send(authenticated_client: TestClient, mo
     sender.assert_not_awaited()
 
 
-def test_client_a_never_uses_client_b_advisor(authenticated_client: TestClient, monkeypatch):
-    _, conversation_a = _setup(authenticated_client, "Client A", "+51911111111")
-    _setup(authenticated_client, "Client B", "+51922222222")
+def test_client_a_never_uses_client_b_advisor(global_admin_client: TestClient, monkeypatch):
+    _, conversation_a = _setup(global_admin_client, "Client A", "+51911111111")
+    _setup(global_admin_client, "Client B", "+51922222222")
     consent = "Sí, que me contacte un asesor"
     _add_consent(conversation_a, consent)
     sender = AsyncMock(return_value={"external_message_id": "wa-out-a"})
@@ -253,8 +253,8 @@ def test_client_a_never_uses_client_b_advisor(authenticated_client: TestClient, 
     assert "51922222222" not in sender.await_args.args[2]["text"]
 
 
-def test_tampered_agency_context_never_sends(authenticated_client: TestClient, monkeypatch):
-    _, conversation_id = _setup(authenticated_client, "Tenant protected")
+def test_tampered_agency_context_never_sends(global_admin_client: TestClient, monkeypatch):
+    _, conversation_id = _setup(global_admin_client, "Tenant protected")
     consent = "Sí, quiero que un asesor me escriba"
     _add_consent(conversation_id, consent)
     sender = AsyncMock()
@@ -271,8 +271,8 @@ def test_tampered_agency_context_never_sends(authenticated_client: TestClient, m
     sender.assert_not_awaited()
 
 
-def test_people_are_preserved_in_notes_and_included_in_advisor_message(authenticated_client: TestClient, monkeypatch):
-    _, conversation_id = _setup(authenticated_client, "Tour party")
+def test_people_are_preserved_in_notes_and_included_in_advisor_message(global_admin_client: TestClient, monkeypatch):
+    _, conversation_id = _setup(global_admin_client, "Tour party")
     consent = "Sí, quiero que un asesor me escriba"
     _add_consent(conversation_id, consent)
     sender = AsyncMock(return_value={"external_message_id": "wa-party"})
@@ -299,8 +299,8 @@ def test_complete_party_composition_is_normalized_without_truncating_members():
         assert _people_from_notes(evidenced) == expected
 
 
-def test_advisor_message_without_people_does_not_invent_them(authenticated_client: TestClient, monkeypatch):
-    _, conversation_id = _setup(authenticated_client, "Unknown party")
+def test_advisor_message_without_people_does_not_invent_them(global_admin_client: TestClient, monkeypatch):
+    _, conversation_id = _setup(global_admin_client, "Unknown party")
     consent = "Sí, pueden llamarme"
     _add_consent(conversation_id, consent)
     sender = AsyncMock(return_value={"external_message_id": "wa-no-party"})
@@ -311,8 +311,8 @@ def test_advisor_message_without_people_does_not_invent_them(authenticated_clien
     assert "Personas:" not in sender.await_args.args[2]["text"]
 
 
-def test_trusted_whatsapp_phone_is_used_without_mutating_lead(authenticated_client: TestClient, monkeypatch):
-    _, conversation_id = _setup(authenticated_client, "LID fallback")
+def test_trusted_whatsapp_phone_is_used_without_mutating_lead(global_admin_client: TestClient, monkeypatch):
+    _, conversation_id = _setup(global_admin_client, "LID fallback")
     consent = "Sí, quiero que un asesor me escriba"
     _add_consent(conversation_id, consent)
     sender = AsyncMock(return_value={"external_message_id": "wa-lid"})
@@ -332,9 +332,9 @@ def test_trusted_whatsapp_phone_is_used_without_mutating_lead(authenticated_clie
     assert "Teléfono: 51988776655" in sender.await_args.args[2]["text"]
 
 
-def test_lucia_tour_qualification_is_specific_and_does_not_repeat_known_people(authenticated_client: TestClient):
-    _, lucia_conversation_id = _setup(authenticated_client, "Chiclayo Tours")
-    _, other_conversation_id = _setup(authenticated_client, "Other Client")
+def test_lucia_tour_qualification_is_specific_and_does_not_repeat_known_people(global_admin_client: TestClient):
+    _, lucia_conversation_id = _setup(global_admin_client, "Chiclayo Tours")
+    _, other_conversation_id = _setup(global_admin_client, "Other Client")
     with TestingSession() as db:
         lucia = db.get(Conversation, uuid.UUID(lucia_conversation_id)).agent
         other = db.get(Conversation, uuid.UUID(other_conversation_id)).agent
@@ -354,8 +354,8 @@ def test_lucia_tour_qualification_is_specific_and_does_not_repeat_known_people(a
     assert "Hola, soy Lucía" not in other_prompt
 
 
-def test_lucia_introduction_uses_deterministic_session_boundaries(authenticated_client: TestClient):
-    _, conversation_id = _setup(authenticated_client, "Chiclayo Tours")
+def test_lucia_introduction_uses_deterministic_session_boundaries(global_admin_client: TestClient):
+    _, conversation_id = _setup(global_admin_client, "Chiclayo Tours")
     now = datetime.now(timezone.utc)
     with TestingSession() as db:
         conversation = db.get(Conversation, uuid.UUID(conversation_id))

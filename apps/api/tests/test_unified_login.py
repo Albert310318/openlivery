@@ -24,8 +24,8 @@ def _portal(client: TestClient, name: str, email: str, *, enabled: bool = True):
     return customer
 
 
-def test_unified_login_routes_admin_and_portal_and_separates_cookies(authenticated_client: TestClient):
-    client = authenticated_client
+def test_unified_login_routes_admin_and_portal_and_separates_cookies(global_admin_client: TestClient):
+    client = global_admin_client
     customer = _portal(client, "Chiclayo Tours", "ventas@chiclayotours.pe")
 
     # The compatible slug login also removes any previous administrator session.
@@ -64,8 +64,8 @@ def test_unified_login_routes_admin_and_portal_and_separates_cookies(authenticat
     assert client.cookies.get("access_token") is None
 
 
-def test_unified_login_rejects_invalid_credentials_and_disabled_portal(authenticated_client: TestClient):
-    client = authenticated_client
+def test_unified_login_rejects_invalid_credentials_and_disabled_portal(global_admin_client: TestClient):
+    client = global_admin_client
     enabled = _portal(client, "Enabled", "enabled@example.com")
     disabled = _portal(client, "Disabled", "disabled@example.com", enabled=False)
 
@@ -84,8 +84,8 @@ def test_unified_login_rejects_invalid_credentials_and_disabled_portal(authentic
     assert enabled["portal_slug"] != disabled["portal_slug"]
 
 
-def test_portal_email_collisions_are_prevented(authenticated_client: TestClient):
-    client = authenticated_client
+def test_portal_email_collisions_are_prevented(global_admin_client: TestClient):
+    client = global_admin_client
     first = _portal(client, "First", "shared@example.com")
     second = client.post(
         "/api/clients",
@@ -106,8 +106,8 @@ def test_portal_email_collisions_are_prevented(authenticated_client: TestClient)
     assert first["id"] != second["id"]
 
 
-def test_unified_login_rejects_legacy_duplicate_portal_email(authenticated_client: TestClient):
-    client = authenticated_client
+def test_unified_login_rejects_legacy_duplicate_portal_email(global_admin_client: TestClient):
+    client = global_admin_client
     _portal(client, "First", "first@example.com")
     _portal(client, "Second", "second@example.com")
     with TestingSession() as db:
