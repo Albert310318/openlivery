@@ -12,6 +12,7 @@ from migrations.bridge_helpers import (
     require_columns,
     table_exists,
 )
+from migrations.restaurant_schema_bridge import ensure_historical_restaurant_schema
 
 
 revision = "0032_payment_notifications"
@@ -90,6 +91,7 @@ def _ensure_payment_methods_table():
 
 
 def upgrade():
+    ensure_historical_restaurant_schema()
     _ensure_payment_methods_table()
     add_column_if_missing(
         "restaurant_payment_methods",

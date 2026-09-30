@@ -114,3 +114,33 @@ def test_payment_identity_preserves_original_values_when_normalizing():
     assert "migration_0034_external_operation_id_reason" in source
     assert "trimmed_external_operation_id" in source
     assert "already_current" in source
+
+
+def test_historical_restaurant_bridge_covers_all_0027_and_0029_objects():
+    source = (API_ROOT / "migrations" / "restaurant_schema_bridge.py").read_text()
+
+    for table_name in (
+        "restaurant_profiles",
+        "restaurant_menu_categories",
+        "restaurant_menu_products",
+        "restaurant_menu_product_variants",
+        "restaurant_menu_product_extras",
+        "restaurant_modalities",
+        "restaurant_delivery_zones",
+        "restaurant_staff",
+        "restaurant_table_accounts",
+    ):
+        assert f'"{table_name}"' in source
+    assert "_ensure_user_phone" in source
+    assert "add_column_if_missing" in source
+    assert "create_foreign_key_if_missing" in source
+    assert "create_unique_constraint_if_missing" in source
+    assert "manager_cashier" in source
+    assert "op.drop_constraint(\"ck_restaurant_staff_role\"" in source
+
+
+def test_delivery_whatsapp_repairs_modalities_before_adding_column():
+    source = (VERSIONS / "0037_delivery_whatsapp.py").read_text()
+    assert source.index("ensure_restaurant_modalities_table()") < source.index(
+        'add_column_if_missing(\n        "restaurant_modalities"'
+    )
