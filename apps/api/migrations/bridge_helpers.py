@@ -20,6 +20,8 @@ def table_exists(table_name: str) -> bool:
 
 
 def column_names(table_name: str) -> set[str]:
+    if not table_exists(table_name):
+        return set()
     return {column["name"] for column in _inspector().get_columns(table_name)}
 
 
@@ -110,6 +112,10 @@ def has_foreign_key(
 
 
 def add_column_if_missing(table_name: str, column) -> bool:
+    if not table_exists(table_name):
+        raise RuntimeError(
+            f"{table_name} does not exist; cannot add column {column.name}"
+        )
     if has_column(table_name, column.name):
         return False
     op.add_column(table_name, column)

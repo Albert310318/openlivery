@@ -87,6 +87,26 @@ def test_preexisting_calendar_and_advisor_objects_are_checked_conditionally():
     assert advisor_source.count("add_column_if_missing") >= 3
 
 
+def test_payment_notifications_repairs_missing_0027_parent_table():
+    source = (VERSIONS / "0032_payment_notifications.py").read_text()
+
+    assert "def _ensure_payment_methods_table" in source
+    assert 'table_exists("restaurant_payment_methods")' in source
+    assert 'op.create_table(\n            "restaurant_payment_methods"' in source
+    assert "PAYMENT_METHOD_COLUMNS" in source
+    assert source.index("_ensure_payment_methods_table()") < source.index(
+        'add_column_if_missing(\n        "restaurant_payment_methods"'
+    )
+
+
+def test_bridge_helpers_do_not_issue_add_column_against_missing_table():
+    source = (API_ROOT / "migrations" / "bridge_helpers.py").read_text()
+
+    assert "if not table_exists(table_name):" in source
+    assert "return set()" in source
+    assert "cannot add column" in source
+
+
 def test_payment_identity_preserves_original_values_when_normalizing():
     source = (VERSIONS / "0034_payment_notification_identity.py").read_text()
 
