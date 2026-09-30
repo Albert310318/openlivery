@@ -3,6 +3,8 @@
 from alembic import op
 import sqlalchemy as sa
 
+from migrations.bridge_helpers import add_column_if_missing
+
 revision = "0040_message_media"
 down_revision = "0039_restaurant_welcome_flyer"
 branch_labels = None
@@ -10,10 +12,10 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("messages", sa.Column("media_kind", sa.String(length=40), nullable=True))
-    op.add_column("messages", sa.Column("media_mime", sa.String(length=120), nullable=True))
-    op.add_column("messages", sa.Column("media_filename", sa.String(length=255), nullable=True))
-    op.add_column("messages", sa.Column("media_data", sa.LargeBinary(), nullable=True))
+    add_column_if_missing("messages", sa.Column("media_kind", sa.String(length=40), nullable=True))
+    add_column_if_missing("messages", sa.Column("media_mime", sa.String(length=120), nullable=True))
+    add_column_if_missing("messages", sa.Column("media_filename", sa.String(length=255), nullable=True))
+    add_column_if_missing("messages", sa.Column("media_data", sa.LargeBinary(), nullable=True))
 
 
 def downgrade():

@@ -3,6 +3,8 @@
 from alembic import op
 import sqlalchemy as sa
 
+from migrations.bridge_helpers import add_column_if_missing
+
 
 revision = "0035_order_reported_amount"
 down_revision = "0034_payment_identity"
@@ -11,7 +13,7 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column(
+    add_column_if_missing(
         "restaurant_orders",
         sa.Column("reported_payment_amount", sa.Numeric(12, 2), nullable=True),
     )

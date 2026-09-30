@@ -3,6 +3,12 @@
 from alembic import op
 import sqlalchemy as sa
 
+from migrations.bridge_helpers import (
+    create_unique_constraint_if_missing,
+    has_constraint,
+    has_unique_columns,
+)
+
 
 revision = "0034_payment_identity"
 down_revision = "0033_payment_mailboxes"
@@ -72,15 +78,23 @@ def _normalize_historical_operation_ids():
             UPDATE payment_notifications AS notification
             SET
                 external_operation_id = NULL,
-                metadata = CAST((
-                    COALESCE(CAST(notification.metadata AS jsonb), CAST('{}' AS jsonb))
-                    || jsonb_build_object(
-                        'migration_0034_original_external_operation_id',
-                        rows_to_clear.external_operation_id,
-                        'migration_0034_external_operation_id_reason',
-                        rows_to_clear.reason
-                    )
-                ) AS json)
+                metadata = CAST(
+                    CASE
+                        WHEN jsonb_typeof(COALESCE(CAST(notification.metadata AS jsonb), CAST('{}' AS jsonb))) = 'object'
+                            THEN COALESCE(CAST(notification.metadata AS jsonb), CAST('{}' AS jsonb))
+                                || jsonb_build_object(
+                                    'migration_0034_original_external_operation_id',
+                                    rows_to_clear.external_operation_id,
+                                    'migration_0034_external_operation_id_reason',
+                                    rows_to_clear.reason
+                                )
+                        ELSE jsonb_build_object(
+                            'migration_0034_original_metadata', CAST(notification.metadata AS jsonb),
+                            'migration_0034_original_external_operation_id', rows_to_clear.external_operation_id,
+                            'migration_0034_external_operation_id_reason', rows_to_clear.reason
+                        )
+                    END AS json
+                )
             FROM rows_to_clear
             WHERE notification.id = rows_to_clear.id;
             """
@@ -89,25 +103,75 @@ def _normalize_historical_operation_ids():
     op.execute(
         sa.text(
             """
-            UPDATE payment_notifications
-            SET external_operation_id = btrim(external_operation_id)
-            WHERE external_operation_id IS NOT NULL
-              AND btrim(external_operation_id) <> external_operation_id;
+            WITH ranked AS (
+                SELECT
+                    id,
+                    external_operation_id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY client_id, btrim(external_operation_id)
+                        ORDER BY
+                            (matched_order_id IS NOT NULL) DESC,
+                            (status = 'matched') DESC,
+                            (processed_at IS NOT NULL) DESC,
+                            received_at ASC NULLS LAST,
+                            occurred_at ASC NULLS LAST,
+                            id ASC
+                    ) AS operation_rank
+                FROM payment_notifications
+                WHERE external_operation_id IS NOT NULL
+                  AND btrim(external_operation_id) <> ''
+                  AND lower(btrim(external_operation_id)) <> 'datos'
+            )
+            UPDATE payment_notifications AS notification
+            SET
+                external_operation_id = btrim(ranked.external_operation_id),
+                metadata = CAST(
+                    CASE
+                        WHEN jsonb_typeof(COALESCE(CAST(notification.metadata AS jsonb), CAST('{}' AS jsonb))) = 'object'
+                            THEN COALESCE(CAST(notification.metadata AS jsonb), CAST('{}' AS jsonb))
+                                || jsonb_build_object(
+                                    'migration_0034_original_external_operation_id', ranked.external_operation_id,
+                                    'migration_0034_external_operation_id_reason', 'trimmed_external_operation_id'
+                                )
+                        ELSE jsonb_build_object(
+                            'migration_0034_original_metadata', CAST(notification.metadata AS jsonb),
+                            'migration_0034_original_external_operation_id', ranked.external_operation_id,
+                            'migration_0034_external_operation_id_reason', 'trimmed_external_operation_id'
+                        )
+                    END AS json
+                )
+            FROM ranked
+            WHERE notification.id = ranked.id
+              AND ranked.operation_rank = 1
+              AND btrim(ranked.external_operation_id) <> ranked.external_operation_id;
             """
         )
     )
 
 
 def upgrade():
+    already_current = has_constraint(
+        "payment_notifications",
+        "uq_payment_notifications_client_operation",
+        "unique",
+    ) or has_unique_columns("payment_notifications", ["client_id", "external_operation_id"])
+    if already_current:
+        return
+
     _normalize_historical_operation_ids()
     # A provider can be resolved differently as parsers evolve, but one
     # operation must remain unique inside the receiving client's mailbox.
-    op.drop_constraint(
-        "uq_payment_notifications_receiver_operation",
+    if has_constraint(
         "payment_notifications",
-        type_="unique",
-    )
-    op.create_unique_constraint(
+        "uq_payment_notifications_receiver_operation",
+        "unique",
+    ):
+        op.drop_constraint(
+            "uq_payment_notifications_receiver_operation",
+            "payment_notifications",
+            type_="unique",
+        )
+    create_unique_constraint_if_missing(
         "uq_payment_notifications_client_operation",
         "payment_notifications",
         ["client_id", "external_operation_id"],

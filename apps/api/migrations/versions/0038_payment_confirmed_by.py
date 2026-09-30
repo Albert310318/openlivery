@@ -3,6 +3,12 @@
 from alembic import op
 import sqlalchemy as sa
 
+from migrations.bridge_helpers import (
+    add_column_if_missing,
+    create_foreign_key_if_missing,
+    create_index_if_missing,
+)
+
 
 revision = "0038_payment_confirmed_by"
 down_revision = "0037_delivery_whatsapp"
@@ -11,8 +17,11 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("restaurant_orders", sa.Column("payment_confirmed_by_user_id", sa.UUID(), nullable=True))
-    op.create_foreign_key(
+    add_column_if_missing(
+        "restaurant_orders",
+        sa.Column("payment_confirmed_by_user_id", sa.UUID(), nullable=True),
+    )
+    create_foreign_key_if_missing(
         "fk_restaurant_orders_payment_confirmed_by_user_id_users",
         "restaurant_orders",
         "users",
@@ -20,7 +29,7 @@ def upgrade():
         ["id"],
         ondelete="SET NULL",
     )
-    op.create_index(
+    create_index_if_missing(
         "ix_restaurant_orders_payment_confirmed_by_user_id",
         "restaurant_orders",
         ["payment_confirmed_by_user_id"],

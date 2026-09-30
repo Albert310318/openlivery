@@ -3,6 +3,8 @@
 from alembic import op
 import sqlalchemy as sa
 
+from migrations.bridge_helpers import add_column_if_missing
+
 
 revision = "0042_lead_advisor_notification"
 down_revision = "0041_delivery_notifications"
@@ -11,12 +13,18 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("leads", sa.Column("advisor_notified_at", sa.DateTime(timezone=True), nullable=True))
-    op.add_column(
+    add_column_if_missing(
+        "leads",
+        sa.Column("advisor_notified_at", sa.DateTime(timezone=True), nullable=True),
+    )
+    add_column_if_missing(
         "leads",
         sa.Column("advisor_notification_external_message_id", sa.String(length=255), nullable=True),
     )
-    op.add_column("leads", sa.Column("advisor_notification_error", sa.Text(), nullable=True))
+    add_column_if_missing(
+        "leads",
+        sa.Column("advisor_notification_error", sa.Text(), nullable=True),
+    )
 
 
 def downgrade():
