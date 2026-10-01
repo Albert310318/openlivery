@@ -14,11 +14,11 @@ def script_directory() -> ScriptDirectory:
 
 def test_production_revision_is_a_known_parent_of_head():
     scripts = script_directory()
-    assert scripts.get_heads() == ["0043_google_calendar"]
+    assert scripts.get_heads() == ["0044_user_schema_bridge"]
     assert scripts.get_revision("0031_restaurant_staff").down_revision == "0030_user_email_verification"
     assert scripts.get_revision("0031_waiter_item_cancellation").down_revision == "0031_restaurant_staff"
 
-    revision = scripts.get_revision("0043_google_calendar")
+    revision = scripts.get_revision("0044_user_schema_bridge")
     seen = set()
     while revision is not None:
         assert revision.revision not in seen
@@ -54,6 +54,7 @@ def test_bridge_upgrades_do_not_delete_schema_or_rows():
         "0041_delivery_notifications.py",
         "0042_lead_advisor_notification.py",
         "0043_google_calendar.py",
+        "0044_user_schema_bridge.py",
     )
     forbidden = {"DropTable", "DropColumn", "Delete", "TruncateTable"}
 
@@ -144,3 +145,23 @@ def test_delivery_whatsapp_repairs_modalities_before_adding_column():
     assert source.index("ensure_restaurant_modalities_table()") < source.index(
         'add_column_if_missing(\n        "restaurant_modalities"'
     )
+
+
+def test_user_schema_bridge_repairs_all_additive_user_columns():
+    source = (VERSIONS / "0044_user_schema_bridge.py").read_text()
+
+    for column_name in (
+        "is_vendiq_admin",
+        "password_recovery_code_hash",
+        "password_recovery_expires_at",
+        "password_recovery_last_sent_at",
+        "password_recovery_send_window_started_at",
+        "password_recovery_attempts",
+        "password_recovery_send_count",
+        "password_recovery_credentials_version",
+        "phone",
+        "email_verification_pending",
+    ):
+        assert f'"{column_name}"' in source
+    assert 'create_index_if_missing("ix_users_phone"' in source
+    assert "require_columns" in source
